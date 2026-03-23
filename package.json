@@ -1,0 +1,14 @@
+{
+	"name": "kio",
+	"private": true,
+	"type": "module",
+	"workspaces": [
+		"packages/*"
+	],
+	"devDependencies": {
+		"@biomejs/biome": "^2.4.8",
+		"@types/bun": "latest",
+		"@typescript/native-preview": "^7.0.0-dev.20260323.1",
+		"typescript": "^5"
+	}
+}
