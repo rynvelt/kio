@@ -24,6 +24,41 @@ A **channel** groups state that shares the same consistency model:
 
 One connection can participate in multiple channels.
 
+#### Broadcast control
+
+By default, every applied operation immediately broadcasts the new shard state to all subscribers (`autoBroadcast: true`). For channels with high-frequency, low-urgency updates — presence, cursor positions, viewport state — the consumer can disable automatic broadcasting and control when broadcasts go out:
+
+```ts
+channel.ephemeral("presence", { autoBroadcast: false })
+channel.durable("game", { autoBroadcast: false })
+channel.durable("game", { broadcastMode: "full" })  // default: "patch"
+```
+
+With `autoBroadcast: false`, operations still apply immediately (server state is always current), but no broadcast is sent. Instead, the engine tracks which shards have changed since their last broadcast on a per-subscriber basis — a dirty set of shard IDs per subscriber. When a shard is updated, its ID is added to the dirty set of every subscriber of that shard.
+
+The consumer triggers broadcasts explicitly via the server API:
+
+```ts
+server.broadcastDirtyShards(channelId: string, shardIds?: string[]): void
+```
+
+- Called with just `channelId`: broadcasts latest state for all dirty shards in that channel, then clears all dirty sets for that channel.
+- Called with `shardIds`: broadcasts only those shards, removes only those IDs from dirty sets. Other dirty shards remain pending.
+
+At broadcast time, the engine reads current in-memory state for each dirty shard — it does not store copies of state in the dirty set. This guarantees the broadcast always contains the latest state, even if the shard was updated multiple times between flushes.
+
+This enables consumer-controlled broadcast policies:
+
+```ts
+// Broadcast presence every 5 seconds
+setInterval(() => {
+  server.broadcastDirtyShards("presence")
+}, 5000)
+
+// Broadcast a specific shard immediately (e.g., new player just joined)
+server.broadcastDirtyShards("presence", [`player:${newPlayerId}`])
+```
+
 #### Ephemeral channel semantics
 
 Ephemeral channels differ from durable channels in several important ways:
@@ -86,6 +121,79 @@ The engine doesn't know or care what shard IDs represent. The consumer controls 
 - Persistent state that survives disconnects
 - Reassigning state to a different connection
 - Read-only spectators (authorize reads but not writes)
+
+### Subscription Shard — "What is this actor allowed to subscribe to?"
+
+The engine maintains a built-in **subscription shard** per actor — a per-resource shard on a dedicated `subscriptions` channel. It tracks which shards the actor is allowed to subscribe to (read). This is the source of truth for read access and drives the engine's default authorization and initial subscription behavior.
+
+**State shape:**
+
+```ts
+// subscriptions:{actorId}
+{
+  refs: [
+    { channelId: "game", shardId: "world" },
+    { channelId: "game", shardId: "seat:3" },
+    { channelId: "presence", shardId: "player:alice" },
+  ]
+}
+```
+
+A shard ref being present means the actor is allowed to subscribe. Absence means denied. There is no explicit "denied" entry — not present = not allowed.
+
+**Persistence:** The consumer chooses whether the subscriptions channel is durable or ephemeral when configuring the engine. Durable means subscription state survives server restarts. Ephemeral means it's rebuilt via `onConnect` on reconnect.
+
+**Bootstrap:** On first connect, if the subscription shard for an actor doesn't exist, the engine creates it with a consumer-provided default set (via `defaultSubscriptions(actor)` hook). If no hook is provided, the shard is created empty. The actor always has access to its own subscription shard — this is hardcoded by the engine, not stored in the shard itself.
+
+**Built-in operations:** The engine provides two server-only operations on the subscriptions channel:
+
+- **`grant`** — adds a shard ref to an actor's subscription shard.
+- **`revoke`** — removes a shard ref from an actor's subscription shard.
+
+These operations reject any submission where `ctx.actor.actorId !== KIO_SERVER_ACTOR`. Only the server-as-actor can modify subscription shards. The engine owns the mechanism; the consumer owns the policy (when and why to grant or revoke).
+
+```ts
+// Consumer's game logic triggers subscription changes via server-as-actor
+server.submit("subscriptions", "grant", {
+  actorId: "bob",
+  ref: { channelId: "presence", shardId: "player:alice" },
+})
+
+server.submit("subscriptions", "revoke", {
+  actorId: "bob",
+  ref: { channelId: "presence", shardId: "player:alice" },
+})
+```
+
+**Concurrency:** If two operations modify the same actor's subscription shard concurrently (e.g., alice and carol both share with bob at the same time), the engine's standard OCC handles it. The second operation gets a version conflict, retries with fresh state, and succeeds. Since adding a ref to a set is always retryable regardless of what else was added, server-submitted operations with `maxRetries: 10` converge reliably.
+
+**Integration with hooks:** The subscription shard provides sensible defaults for authorization and initial subscriptions (see Section 8). The consumer can override these hooks entirely if they want different logic.
+
+**Client observability:** The client subscribes to its own subscription shard like any other shard. Consumer code can watch it to react to access changes — for example, rendering a location-sharing panel when a new presence ref appears:
+
+```tsx
+function SharePanel() {
+  const subscriptions = useShardState("subscriptions", "subscription", myActorId)
+  if (subscriptions.syncStatus !== "latest") return null
+
+  // Derive which presence shards we have access to
+  const sharedPlayerIds = subscriptions.state.refs
+    .filter(r => r.channelId === "presence" && r.shardId !== `player:${myActorId}`)
+    .map(r => r.shardId)
+
+  return sharedPlayerIds.map(shardId => (
+    <SharedPlayerLocation key={shardId} shardId={shardId} />
+  ))
+}
+
+function SharedPlayerLocation({ shardId }: { shardId: string }) {
+  const presence = useShardState("presence", "player", shardId)
+
+  if (presence.syncStatus === "unavailable") return <NotSharedYet />
+  if (presence.syncStatus === "loading") return <Loading />
+  return <PlayerMarker gps={presence.state.gps} />
+}
+```
 
 ---
 
@@ -262,7 +370,7 @@ If an operation produces private data (a personal hint, a private score), that d
 - *Personal hint* → store in `seat:3:hints`. Only the player at seat 3 is subscribed. The broadcast reaches all subscribers — which is just one person.
 - *Private score* → store in `seat:3:score`. Same pattern.
 
-The consumer controls who subscribes to what via `subscriptionsOnConnect()` and `authorizeSubscription()`. The engine doesn't need to know what's "private" — it just broadcasts to subscribers, and the subscription model ensures the right people see the right shards.
+The consumer controls who subscribes to what via the subscription shard (see Section 1). The server grants or revokes access by modifying an actor's subscription shard. The engine doesn't need to know what's "private" — it just broadcasts to subscribers, and the subscription model ensures the right people see the right shards.
 
 ### Server as Actor
 
@@ -272,7 +380,7 @@ The server can submit operations through the same pipeline as clients:
 - NPC acts on a schedule → server submits an NPC action
 - External webhook arrives → server submits a state update
 
-Same `submit()` API, same `apply()`, same persistence and broadcast. The server is just another participant. When the server submits, it can configure `{ maxRetries: Infinity }` to keep retrying on version conflicts — useful for operations that must eventually land (e.g., ending a game when a countdown reaches zero).
+Same `submit()` API, same `apply()`, same persistence and broadcast. The server is just another participant. When the server submits, it can configure `{ maxRetries: 10 }` to keep retrying on version conflicts — useful for operations that must eventually land (e.g., ending a game when a countdown reaches zero).
 
 For server-submitted operations, `ctx.actor` is a synthetic system actor: `{ actorId: "__kio:server__" }`. The engine exports this as a constant (`KIO_SERVER_ACTOR`). Consumer code in shared `apply()` functions can check `ctx.actor.actorId === KIO_SERVER_ACTOR` if it needs to distinguish server-initiated operations from player-initiated ones. Broadcasts for server-submitted operations include this actor ID in the `causedBy` metadata.
 
@@ -286,16 +394,30 @@ For client requests needing server-side computation (dice roll), the `compute()`
 
 ### Broadcasting — "State, not operations"
 
-The server broadcasts **complete shard state snapshots**, not operations. After every applied operation, the server sends the new shard state and version to subscribers.
+The server broadcasts **complete shard state snapshots**, not operations. A broadcast message always carries an array of shard entries scoped to a single channel. The channel's kind (durable or ephemeral) determines the shape of each entry — enforced by the type system, not by convention:
 
+```ts
+type Patch = { op: "add" | "replace" | "remove"; path: string; value?: unknown }
+
+type DurableShardEntry = {
+  shardId: string
+  version: number
+  causedBy?: CausedBy
+} & ({ state: unknown } | { patches: Patch[] })
+
+type EphemeralShardEntry = {
+  shardId: string
+  causedBy?: CausedBy
+} & ({ state: unknown } | { patches: Patch[] })
+
+type BroadcastMessage =
+  | { type: "broadcast"; channelId: string; kind: "durable"; shards: DurableShardEntry[] }
+  | { type: "broadcast"; channelId: string; kind: "ephemeral"; shards: EphemeralShardEntry[] }
 ```
-{
-  shardId: "seat:3:inv",
-  version: 15,
-  state: { items: [...] },
-  causedBy: { operation: "useItem", input: { itemId: "potion-1" }, actor: "player:alice" }
-}
-```
+
+Each shard entry carries either `state` (full snapshot) or `patches` (Immer JSON Patch operations) — never both. The engine chooses based on the channel's `broadcastMode` and the specific broadcast context (initial connect always uses `state`).
+
+Lifting `channelId` and `kind` to the message level makes mixed-channel broadcasts structurally impossible. Durable entries always carry a `version`; ephemeral entries never do. A single shard update is an array of length 1. A coalesced flush (see Broadcast Control in Section 1) produces an array with multiple entries.
 
 `state` is the truth — the client uses it directly. `causedBy` is metadata for UI purposes (animations, notifications, sound effects). If `causedBy` is missing or unrecognized (stale client code after deployment), the client still works — it just doesn't animate.
 
@@ -305,6 +427,26 @@ Why state instead of operations:
 - **Ordering doesn't matter.** Each broadcast carries a version. The client ignores versions lower than what it already has.
 - **Recovery is trivial.** A reconnecting client just needs current state per shard — same as any broadcast.
 - **Sharding makes it efficient.** Per-resource shards are small. Broadcasting a seat's inventory is barely more bytes than the operation itself.
+
+#### Patch-based broadcasting
+
+By default, the engine broadcasts **patches** (Immer's JSON Patch output) instead of full shard state. Since `apply()` already runs on Immer drafts, the engine uses `produceWithPatches()` instead of `produce()` to capture the patches automatically — zero consumer code, zero API change.
+
+Patches describe only what changed. For a fog-of-war shard with 500 revealed cells where 3 are added, the broadcast contains 3 patch operations instead of all 503 cells. For a seat inventory where one item is removed, the broadcast contains one `remove` operation instead of the entire inventory.
+
+The engine uses full state (not patches) in these cases:
+- **Initial connect and reconnect** — the client has no base state to patch against.
+- **Rejection with fresh state** — the client needs a complete base after a conflict.
+- **When the patch is larger than the full state** — rare, but the engine falls back automatically.
+
+Consumers can force full-state broadcasts per channel as an escape hatch:
+
+```ts
+channel.durable("game", { broadcastMode: "full" })    // always broadcast full state
+channel.durable("game", { broadcastMode: "patch" })   // default — broadcast patches
+```
+
+This is transparent to the client — the ShardStore handles both modes. `useShardState()` and the `ShardState<T>` type are unchanged. The consumer's `apply()` code is unchanged.
 
 ### Client-Side State — "One state, not two"
 
@@ -316,16 +458,17 @@ const inventory = client.channel("game").state("seat", "seat:3")
 
 // Shard state is a discriminated union — syncStatus narrows the type of state:
 const shard = client.channel("game").shardState("seat", "seat:3")
-// shard.syncStatus: "loading" | "stale" | "current"
+// shard.syncStatus: "unavailable" | "loading" | "stale" | "latest"
 // shard.state:      null (when loading) | T (when stale or current)
 // shard.pending:    null | { operationName, input }
 ```
 
 ```ts
 type ShardState<T> =
+  | { syncStatus: "unavailable"; state: null; pending: null }
   | { syncStatus: "loading"; state: null; pending: null }
   | { syncStatus: "stale"; state: T; pending: { operationName: string; input: unknown } | null }
-  | { syncStatus: "current"; state: T; pending: { operationName: string; input: unknown } | null }
+  | { syncStatus: "latest"; state: T; pending: { operationName: string; input: unknown } | null }
 ```
 
 When the consumer checks `syncStatus`, TypeScript narrows `state` automatically — no null checks scattered through the code:
@@ -392,9 +535,10 @@ class ShardStore<T> {
   // ── Consumer-facing API ──────────────────────────────────────────
   get snapshot(): ShardState<T>
     // Discriminated union — syncStatus narrows the type:
-    // { syncStatus: "loading", state: null, pending: null }
-    // { syncStatus: "stale",   state: T,    pending: ... | null }
-    // { syncStatus: "current", state: T,    pending: ... | null }
+    // { syncStatus: "unavailable", state: null, pending: null }
+    // { syncStatus: "loading",     state: null, pending: null }
+    // { syncStatus: "stale",       state: T,    pending: ... | null }
+    // { syncStatus: "latest",      state: T,    pending: ... | null }
 
   subscribe(listener: () => void): () => void  // listener called on any state change
 }
@@ -402,16 +546,21 @@ class ShardStore<T> {
 
 The `state` property returns a stable reference — only replaced when the underlying state actually changes. This makes it compatible with any reactive framework (React's `useSyncExternalStore`, Solid signals, Svelte stores, etc.) without special caching.
 
-**Manifest handling:** When the engine receives a `manifest` message, it sets `serverVersion` on each ShardStore. If `serverVersion > authoritative.version`, the store transitions to `syncStatus: "stale"`. When the subsequent broadcast arrives and updates `authoritative`, it transitions to `"current"`. This enables the consumer to show "syncing..." indicators on shards that have valid-but-outdated state.
+**Manifest handling:** When the engine receives a `manifest` message, it sets `serverVersion` on each ShardStore. If `serverVersion > authoritative.version`, the store transitions to `syncStatus: "stale"`. When the subsequent broadcast arrives and updates `authoritative`, it transitions to `"latest"`. This enables the consumer to show "syncing..." indicators on shards that have valid-but-outdated state.
 
-Ephemeral shards are not included in the manifest (they have no versions). An ephemeral ShardStore starts in `"loading"` and transitions directly to `"current"` on its first broadcast — there is no `"stale"` state for ephemeral shards.
+Ephemeral shards are not included in the manifest (they have no versions). An ephemeral ShardStore starts in `"loading"` and transitions directly to `"latest"` on its first broadcast — there is no `"stale"` state for ephemeral shards.
 
-**On server broadcast** (version V, state S, metadata C):
+**Unavailable state:** A ShardStore starts in `"unavailable"` when the actor's subscription shard does not include the corresponding shard ref. The consumer can declare a ShardStore for any shard — even one the actor doesn't have access to yet. The ShardStore exists, but with `state: null`. When the server grants access (adds the ref to the actor's subscription shard and starts sending broadcasts), the store transitions to `"loading"` → `"latest"`. When access is revoked (ref removed from subscription shard, server stops sending broadcasts), the store transitions back to `"unavailable"` and state is cleared to `null`.
 
-For **durable channels** (versioned):
+**On server broadcast:**
+
+The client receives a broadcast message with `channelId`, `kind`, and an array of shard entries. The client iterates the entries and feeds each to the corresponding ShardStore. The processing per entry depends on the channel kind:
+
+For **durable channels** (entry has version V, metadata C, and either full state S or patches P):
 
 1. If `V <= authoritative.version` → ignore (stale).
-2. Set `authoritative = { state: S, version: V }`.
+2. If entry has `state` → set `authoritative = { state: S, version: V }`.
+   If entry has `patches` → set `authoritative = { state: applyPatches(authoritative.state, P), version: V }`.
 3. If no pending → done.
 4. If `C` confirms our pending operation (matching operation ID) → clear pending.
 5. If someone else's change and pending exists:
@@ -419,13 +568,15 @@ For **durable channels** (versioned):
    - `pending.versionChecked === false` → keep pending, re-compute by running `pending.apply()` against new authoritative state. The prediction is a pure overwrite — still valid regardless of what others changed.
 6. Notify subscribers.
 
-For **ephemeral channels** (unversioned):
+For **ephemeral channels** (entry has metadata C, no version, and either full state S or patches P):
 
-1. Always accept — set `authoritative = { state: S }`. No version comparison.
+1. Always accept. If entry has `state` → set `authoritative = { state: S }`. If entry has `patches` → set `authoritative = { state: applyPatches(authoritative.state, P) }`. No version comparison.
 2. Same pending logic as above (steps 3–5), though in practice most ephemeral operations are `versionChecked: false` so pending is always kept.
 3. Notify subscribers.
 
 The same ShardStore class handles both — `version` is `undefined` for ephemeral shards, and the "ignore if stale" check is skipped when there's no version. Consumers should be aware that without versioning, briefly stale state is possible if broadcasts arrive out of order. For ephemeral data like presence this is acceptable — the next update corrects it within seconds.
+
+When a broadcast message contains multiple entries (from a coalesced flush), the client engine processes all entries in a single synchronous loop, updating each ShardStore and notifying its subscribers in turn. Framework bindings (e.g., `kio-react`) are responsible for batching UI updates across multiple ShardStore notifications if needed — the core engine does not implement framework-specific rendering optimizations.
 
 **On optimistic submit:**
 
@@ -858,15 +1009,15 @@ The engine defines a small set of message types encoded/decoded by the codec:
 
 ```ts
 // Client → Server
-| { type: "subscribe", shardRefs: ShardRef[], shardVersions?: Record<string, number> }
-| { type: "unsubscribe", shardRefs: ShardRef[] }
 | { type: "submit", opName: string, input: unknown, shardVersions: Record<string, number>, opId: string }
 // Note: recovery is not a separate message — shard versions are sent in the handshake (query params)
-// and in subscribe messages (for mid-session subscription changes)
 
 // Server → Client
 | { type: "manifest", versions: Record<string, number> }  // first message after connect — current server versions per shard
-| { type: "broadcast", shardId: string, version: number, state: unknown, causedBy?: CausedBy }
+| { type: "broadcast", channelId: string, kind: "durable",
+    shards: Array<DurableShardEntry> }   // see Section 3 for entry types (state or patches)
+| { type: "broadcast", channelId: string, kind: "ephemeral",
+    shards: Array<EphemeralShardEntry> } // see Section 3 for entry types (state or patches)
 | { type: "acknowledge", opId: string }
 | { type: "reject", opId: string, error: ErrorInfo, freshShards: Record<string, { state: unknown; version: number }> }
 | { type: "ready" }  // sent after all stale shard broadcasts complete
@@ -910,15 +1061,18 @@ The engine's perspective:
 1. IncomingConnection arrives with { headers, query, extra }
    → query contains auth, intent, and shard versions
 2. Engine runs authenticate(conn) → actor
-3. Engine runs subscriptionsOnConnect(actor, conn, channelName) per channel → shard refs
-4. Engine parses client's shard versions from conn.query
-5. Engine sends manifest: { type: "manifest", versions: { shardId: serverVersion, ... } }
-6. For each subscribed shard:
+3. Engine loads (or creates) the actor's subscription shard
+   → If new actor: calls defaultSubscriptions(actor) to populate initial refs
+   → If subscriptionsOnConnect hook is provided: calls it instead (override)
+4. Engine determines subscribed shards from subscription shard refs
+5. Engine parses client's shard versions from conn.query
+6. Engine sends manifest: { type: "manifest", versions: { shardId: serverVersion, ... } }
+7. For each subscribed shard:
    → server version == client version → skip (client is up to date)
    → server version > client version  → send current state via transport.send()
    → client didn't report this shard  → send current state
-7. Engine sends "ready" via transport.send()
-8. Engine calls consumer's onConnect(actor) hook
+8. Engine sends "ready" via transport.send()
+9. Engine calls consumer's onConnect(actor) hook
 ```
 
 The server sends state using the same `transport.send()` it uses for any broadcast — no special mechanism. The shard versions travel up via the HTTP handshake; the state travels down via normal transport messages.
@@ -927,18 +1081,18 @@ For a reconnect after a brief connection drop, this means near-zero data — the
 
 If the client can't include shard versions in the handshake (too many shards, URL length limits), it sends an empty map and gets a full sync — graceful fallback to the same behavior as a first connection.
 
-The consumer's `subscriptions()` hook reads intent from `conn.query`:
+By default, the engine reads the actor's subscription shard to determine which shards to deliver. For consumers that need connection-specific logic (e.g., different subscriptions based on URL query params), the `subscriptionsOnConnect` hook overrides this:
 
 ```ts
+// Optional override — replaces subscription shard lookup for initial subscriptions
 subscriptionsOnConnect(actor, conn, channelName) {
-  // Example for the "game" channel:
   const roomId = conn.query.room
   const seatId = seatAssignments.getSeatForPlayer(actor.actorId, roomId)
   return [shard.ref("world"), shard.ref("seat", seatId)]
 }
 ```
 
-**Mid-session subscription changes:** After the initial connection, the client can request changes via `subscribe()` / `unsubscribe()` messages. The server runs `authorizeSubscription(actor, shardRefs)` before adding new subscriptions. For newly subscribed shards, the client can include its local version so the server only sends state if it's changed.
+**Mid-session subscription changes:** Subscriptions are managed server-side via the subscription shard (see Section 1). When the server grants or revokes access by modifying an actor's subscription shard, the engine updates its internal subscriber map and starts or stops sending broadcasts accordingly. The client observes these changes through its own subscription shard's ShardStore and reacts in the UI — there is no client-initiated subscribe/unsubscribe message.
 
 **Disconnection:**
 
@@ -1041,18 +1195,19 @@ All hooks are optional.
 ### Connection Lifecycle
 
 - `authenticate(conn)` — runs **once on connect**. Validates credentials, returns an actor object with `actorId: string` (required) plus any consumer-defined fields. This object is available as `ctx.actor` in all subsequent hooks and handler functions.
-- `subscriptionsOnConnect(actor, conn, channelName)` — runs **once per channel on connect**, right after authentication. Returns the shard refs for that channel this actor should receive state for. Running per channel keeps the logic clean — the consumer writes separate subscription logic for game vs. presence. Can be async if the consumer wants to load subscription preferences from their own database.
+- `defaultSubscriptions(actor)` — returns the initial set of shard refs for a new actor's subscription shard. Called **once**, when the actor's subscription shard is first created (not on every connect). If not provided, the subscription shard is created empty. The actor's own subscription shard ref is always included automatically — the consumer does not need to add it.
+- `subscriptionsOnConnect(actor, conn, channelName)` — **optional override**. If provided, replaces the default behavior of reading the subscription shard. Runs once per channel on connect, right after authentication. Returns the shard refs for that channel this actor should receive state for. Use this when you need subscription logic that doesn't fit the subscription shard model (e.g., based on URL query params, connection-specific context, or an external system).
 - `onConnect(actor)` — called after authentication and initial subscription setup (e.g., submit presence operations).
 - `onDisconnect(actor, reason)` — called when connection drops (e.g., mark player offline).
 
 ### Authorization
 
-- `authorize(actor, operationName, shardRefs)` — runs **on every operation submission**. Can this actor perform this operation on these shards?
-- `authorizeSubscription(actor, shardRefs)` — runs **on mid-session subscription requests**. Can this actor subscribe to (read) these shards? Not called for the initial set from `subscriptionsOnConnect()` — those are implicitly authorized.
+- `authorize(actor, operationName, shardRefs)` — runs **on every operation submission**. Can this actor perform this operation on these shards? The subscription shard does not affect write authorization — this hook is the sole authority for operation permissions.
+- `authorizeSubscription(actor, shardRefs)` — **optional override**. By default, the engine checks the actor's subscription shard: if the shard ref is present, access is granted; if absent, access is denied. If the consumer provides this hook, it replaces the subscription shard check entirely — the consumer takes full responsibility for authorization logic.
 
-### Subscriptions are in-memory and ephemeral
+### Subscriptions and the subscriber map
 
-The engine maintains a simple in-memory map of which connections are subscribed to which shards:
+The engine maintains an in-memory map of which connections are subscribed to which shards:
 
 ```ts
 // Engine internal — not exposed to consumers
@@ -1062,22 +1217,14 @@ connections: Map<connectionId, {
 }>
 ```
 
-This is never persisted. On server reboot, it's gone. On client reconnect:
+This map is never persisted. On server reboot, it's gone. On client reconnect:
 
 1. `authenticate()` runs → actor identity restored
-2. `subscriptionsOnConnect()` runs → initial subscriptions restored
-3. Client sends shard versions → server sends state for stale shards
+2. Engine reads the actor's subscription shard → determines allowed shard refs
+3. Engine populates the subscriber map for this connection
+4. Client sends shard versions → server sends state for stale shards
 
-Mid-session subscriptions added via `subscribe()` are lost on disconnect. The client-side engine remembers what it was subscribed to and automatically re-sends `subscribe()` for any shards beyond the initial set after reconnection. The server runs `authorizeSubscription()` for each re-requested shard.
-
-If a consumer wants persistent subscription preferences, they store them in their own database and load them in `subscriptionsOnConnect()`:
-
-```ts
-subscriptionsOnConnect(actor, conn, channelName) {
-  const saved = await db.getSubscriptionPreferences(actor.actorId, channelName)
-  return saved ?? defaultSubscriptions(actor, conn, channelName)
-}
-```
+The subscription shard is the persistent source of truth for what an actor is allowed to subscribe to. The in-memory subscriber map is a runtime projection of that state. When the subscription shard changes (via `grant`/`revoke` operations), the engine updates the subscriber map to match — adding or removing the connection from the affected shards' broadcast lists.
 
 ### Operation Lifecycle
 
@@ -1108,12 +1255,14 @@ Default: an extended JSON codec that handles `Set` and `Map` (serialized as tagg
 - Authoritative server state with OCC
 - Optimistic client state with automatic reconciliation
 - State sharding with per-shard versioning
-- State broadcasting (complete shard snapshots)
+- State broadcasting (complete shard snapshots, array-based, per-channel)
+- Broadcast control (`autoBroadcast`, `broadcastDirtyShards`, per-subscriber dirty tracking)
 - Recovery via current-state delivery
 - Client-side `canRetry` hook for automatic retry on version conflicts
 - Server as actor (submitting operations through the same pipeline)
+- Subscription shard (per-actor, engine-managed, built-in grant/revoke operations)
 - Transport, persistence, and serialization as pluggable adapters
-- Authorization and lifecycle hooks
+- Authorization and lifecycle hooks (with subscription-shard-based defaults)
 - Runtime validation of operation inputs (Valibot/Zod schemas)
 - Adapter conformance test suite
 - Mock transport for testing
@@ -1129,7 +1278,120 @@ Default: an extended JSON codec that handles `Set` and `Map` (serialized as tagg
 
 ---
 
-## 10. DSL Example
+## 10. Testing Strategy
+
+### Type-level tests
+
+The builder API and schema split rely heavily on TypeScript's type system to enforce correctness — invalid flag combinations, `apply()` placement, `reject()` codes, etc. These constraints must be tested to prevent regressions. Since the "feature" is that certain code doesn't compile, tests must verify both positive cases (should compile) and negative cases (should not compile).
+
+Two techniques, combined:
+
+**`@ts-expect-error` for negative tests.** A line annotated with `@ts-expect-error` must produce a type error. If it doesn't (e.g., a refactor accidentally made the invalid combination valid), TypeScript itself errors — the test fails in CI.
+
+**Type-level assertion helpers for positive tests.** Utility types that fail at compile time if the inferred type doesn't match expectations.
+
+```ts
+// types.test.ts — no runtime, pure compile-time assertions
+
+import { channel, shard } from "kio/core"
+import * as v from "valibot"
+
+type Expect<T extends true> = T
+type Equal<A, B> = [A] extends [B] ? [B] extends [A] ? true : false : false
+
+const worldSchema = v.object({ gameStage: v.string() })
+const seatSchema = v.object({ inventory: v.array(v.object({ id: v.string() })) })
+
+const ch = channel.durable("test")
+  .shard("world", worldSchema)
+  .shardPerResource("seat", seatSchema)
+
+// ── Positive: builder infers correct shard types ──────────────
+type Shards = InferShards<typeof ch>
+type _1 = Expect<Equal<Shards["world"], { gameStage: string }>>
+
+// ── Positive: optimistic operation accepts apply() ────────────
+ch.operation("visit", {
+  execution: "optimistic",
+  versionChecked: true,
+  deduplicate: true,
+  input: v.object({ seatId: v.string() }),
+  scope: (input) => [shard.ref("seat", input.seatId)],
+  apply({ seat }, input) { /* compiles */ },
+})
+
+// ── Negative: optimistic requires apply() ─────────────────────
+// @ts-expect-error: missing apply() for optimistic operation
+ch.operation("bad1", {
+  execution: "optimistic",
+  versionChecked: true,
+  deduplicate: true,
+  input: v.object({ seatId: v.string() }),
+  scope: (input) => [shard.ref("seat", input.seatId)],
+})
+
+// ── Negative: computed rejects apply() in schema ──────────────
+// @ts-expect-error: apply() not allowed here for computed operation
+ch.operation("bad2", {
+  execution: "computed",
+  versionChecked: true,
+  deduplicate: true,
+  input: v.object({ x: v.string() }),
+  scope: () => [shard.ref("world")],
+  apply({ world }, input) { /* should not compile */ },
+})
+
+// ── Negative: optimistic + multi-shard scope ──────────────────
+// @ts-expect-error: optimistic not allowed with multi-shard scope
+ch.operation("bad3", {
+  execution: "optimistic",
+  versionChecked: true,
+  deduplicate: true,
+  input: v.object({ from: v.string(), to: v.string() }),
+  scope: (input) => [shard.ref("seat", input.from), shard.ref("seat", input.to)],
+  apply() {},
+})
+
+// ── Negative: reject() enforces declared error codes ──────────
+ch.operation("typed", {
+  execution: "confirmed",
+  versionChecked: true,
+  deduplicate: true,
+  input: v.object({ id: v.string() }),
+  errors: v.picklist(["NOT_FOUND", "EXPIRED"]),
+  scope: () => [shard.ref("world")],
+}).serverImpl("typed", {
+  validate(shards, input, ctx, { reject }) {
+    reject("NOT_FOUND", "ok")    // ✅ compiles
+    // @ts-expect-error: "INVALID" is not in the errors picklist
+    reject("INVALID", "bad")
+  },
+  apply() {},
+})
+```
+
+These tests run as part of normal type checking (`tsc` / `tsgo`) — no extra tooling, no test runner dependency. They catch regressions in the type system that runtime tests would miss.
+
+### Runtime tests
+
+Standard Vitest tests for the engine's runtime behavior:
+
+- **Operation pipeline:** submit → validate → compute → apply → state changes correctly
+- **ShardStore reconciliation:** optimistic apply → broadcast → pending cleared / discarded
+- **Version checking:** stale operations rejected, fresh operations accepted
+- **Deduplication:** duplicate operation IDs rejected
+- **canRetry:** retry logic with fresh state, attempt counting, max retries
+- **Error model:** OperationError produces typed rejections, thrown errors produce INTERNAL_ERROR
+
+All runtime tests use an in-memory transport (direct function calls, no network) and in-memory persistence. No infrastructure needed.
+
+### Adapter conformance tests
+
+Shipped as `kio-test-kit` — consumers run them against their persistence or transport adapters (see Section 7).
+
+---
+
+## 11. DSL Example
 
 ### `schema.ts` — shared contract (imported by both client and server)
 
@@ -1236,7 +1498,7 @@ export const gameChannel = channel.durable("game")
     ],
   })
 
-export const presenceChannel = channel.ephemeral("presence")
+export const presenceChannel = channel.ephemeral("presence", { autoBroadcast: false })
   .shardPerResource("player", presenceState)
 
   .operation("updateLocation", {
@@ -1382,17 +1644,17 @@ const server = createServer(serverEngine, {
     return shardRefs.every(ref => canSeatAccess(seatId, ref))
   },
 
-  subscriptionsOnConnect(actor, conn, channelName) {
-    // Runs once per channel on connect
-    if (channelName === "game") {
-      const roomId = conn.query.room
-      const seatId = seatAssignments.getSeatForPlayer(actor.actorId, roomId)
-      return [shard.ref("world"), shard.ref("seat", seatId)]
-    }
-    if (channelName === "presence") {
-      return [shard.ref("player", actor.actorId)]
-    }
-    return []
+  // Default subscriptions for new actors — called once when the subscription
+  // shard is first created. On subsequent connects, the engine reads the
+  // existing subscription shard.
+  defaultSubscriptions(actor) {
+    const roomId = roomAssignments.getRoomForPlayer(actor.actorId)
+    const seatId = seatAssignments.getSeatForPlayer(actor.actorId, roomId)
+    return [
+      { channelId: "game", shardId: "world" },
+      { channelId: "game", shardId: `seat:${seatId}` },
+      { channelId: "presence", shardId: `player:${actor.actorId}` },
+    ]
   },
 
   onConnect(actor) {
@@ -1410,6 +1672,13 @@ const server = createServer(serverEngine, {
 onGameTimerExpired(roomId, () => {
   server.submit("game", "changeGameStage", { gameStage: "FINISHED" })
 })
+
+// Presence uses autoBroadcast: false — flush on a 5-second interval.
+// Operations apply immediately (server state is always current),
+// but subscribers receive coalesced updates every 5 seconds.
+setInterval(() => {
+  server.broadcastDirtyShards("presence")
+}, 5000)
 ```
 
 ### `client.ts` — framework-agnostic
@@ -1423,11 +1692,10 @@ const client = createClient(clientEngine, {
   transport: socketIoTransport({ url: "wss://api.example.com/ws" }),
 })
 
-// Subscribe to shards
-client.channel("game").subscribe(
-  shard.ref("world"),
-  shard.ref("seat", "seat:3"),
-)
+// No client-initiated subscribe — the server manages subscriptions via the
+// subscription shard. The client receives shards based on its subscription
+// shard state, populated by defaultSubscriptions() on first connect and
+// modified by server-submitted grant/revoke operations.
 
 // Submit — fully typed from schema
 const result = await client.channel("game").submit("useItem", {
@@ -1435,7 +1703,7 @@ const result = await client.channel("game").submit("useItem", {
   itemId: "potion-1",
 })
 
-// Read state — single resolved state
+// Read state — single resolved state, syncStatus indicates availability
 const world = client.channel("game").state("world")
 const mySeat = client.channel("game").state("seat", "seat:3")
 ```
@@ -1492,3 +1760,76 @@ function Game({ seatId }: { seatId: string }) {
   )
 }
 ```
+
+### Location sharing via subscription shard
+
+This example shows how the subscription shard enables location sharing without point-to-point messaging. The server controls who can see whose presence. The client reacts to subscription shard changes to render shared locations.
+
+**Server-side** — consumer's game logic triggers subscription changes:
+
+```ts
+// When alice shares her location with bob, the consumer's domain logic
+// grants bob access to alice's presence shard.
+gameChannel.serverImpl("startShare", {
+  validate(shards, input, ctx, { reject }) {
+    if (input.targetPlayerId === ctx.actor.actorId) {
+      return reject("CANNOT_SELF_SHARE", "Cannot share with yourself")
+    }
+  },
+  apply(shards, input) {
+    // consumer's share tracking logic
+  },
+})
+
+// In the server setup, after applying the share:
+server.hooks.afterApply("game", "startShare", (operation, oldStates, newStates, ctx) => {
+  // Grant bob access to alice's presence shard
+  server.submit("subscriptions", "grant", {
+    actorId: operation.input.targetPlayerId,
+    ref: { channelId: "presence", shardId: `player:${ctx.actor.actorId}` },
+  })
+})
+
+server.hooks.afterApply("game", "stopShare", (operation, oldStates, newStates, ctx) => {
+  // Revoke bob's access to alice's presence shard
+  server.submit("subscriptions", "revoke", {
+    actorId: operation.input.targetPlayerId,
+    ref: { channelId: "presence", shardId: `player:${ctx.actor.actorId}` },
+  })
+})
+```
+
+**Client-side** — consumer watches the subscription shard to discover shared players:
+
+```tsx
+function LocationSharingPanel({ myActorId }: { myActorId: string }) {
+  // Watch own subscription shard to discover access changes
+  const subscriptions = useShardState("subscriptions", "subscription", myActorId)
+  if (subscriptions.syncStatus !== "latest") return null
+
+  // Derive which other players' presence we have access to
+  const sharedPlayerShardIds = subscriptions.state.refs
+    .filter(r => r.channelId === "presence" && r.shardId !== `player:${myActorId}`)
+    .map(r => r.shardId)
+
+  return sharedPlayerShardIds.map(shardId => (
+    <SharedPlayerLocation key={shardId} shardId={shardId} />
+  ))
+}
+
+function SharedPlayerLocation({ shardId }: { shardId: string }) {
+  // Declare interest in this shard — syncStatus reflects access state
+  const presence = useShardState("presence", "player", shardId)
+
+  if (presence.syncStatus === "unavailable") return null   // access not yet active
+  if (presence.syncStatus === "loading") return <Loading />
+  return <PlayerMarker gps={presence.state.gps} />
+}
+```
+
+The flow:
+1. Alice submits `startShare` → server applies, then grants bob access via `subscriptions/grant`
+2. Bob's subscription shard updates → his `LocationSharingPanel` re-renders, showing alice's shard ID
+3. `SharedPlayerLocation` mounts with alice's shard ID → ShardStore transitions from `"unavailable"` to `"loading"` to `"latest"` as the server delivers alice's presence state
+4. Alice's GPS updates arrive via normal presence broadcasts
+5. When alice stops sharing → server revokes → subscription shard updates → component unmounts → ShardStore returns to `"unavailable"`
