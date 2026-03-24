@@ -376,3 +376,60 @@ channel
 	})
 	// @ts-expect-error: "doesNotExist" is not a defined operation
 	.serverImpl("doesNotExist", {});
+
+// ── 20. clientImpl with typed canRetry ───────────────────────────────
+
+channel
+	.durable("game")
+	.shardPerResource("seat", seatState)
+	.operation("useItem", {
+		execution: "optimistic",
+		versionChecked: true,
+		deduplicate: true,
+		input: v.object({ seatId: v.string(), itemId: v.string() }),
+		scope: (input) => [shard.ref("seat", input.seatId)],
+		apply(shards, input) {
+			shards.seat(input.seatId).inventory.splice(0, 1);
+		},
+	})
+	.clientImpl("useItem", {
+		canRetry(input, freshShards) {
+			// input is typed as { seatId: string; itemId: string }
+			const _id: string = input.itemId;
+			// freshShards has seat accessor
+			return freshShards
+				.seat(input.seatId)
+				.inventory.some((i) => i.id === input.itemId);
+		},
+	});
+
+// ── 21. clientImpl with no canRetry (empty config) ───────────────────
+
+channel
+	.durable("game")
+	.shard("world", worldState)
+	.operation("simple", {
+		execution: "optimistic",
+		versionChecked: false,
+		deduplicate: false,
+		input: v.object({}),
+		scope: () => [shard.ref("world")],
+		apply() {},
+	})
+	.clientImpl("simple", {});
+
+// ── 22. Negative: clientImpl for non-existent operation ──────────────
+
+channel
+	.durable("game")
+	.shard("world", worldState)
+	.operation("exists", {
+		execution: "optimistic",
+		versionChecked: true,
+		deduplicate: true,
+		input: v.object({}),
+		scope: () => [shard.ref("world")],
+		apply() {},
+	})
+	// @ts-expect-error: "nope" is not a defined operation
+	.clientImpl("nope", {});

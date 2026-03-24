@@ -167,6 +167,25 @@ type ServerImplLookup<D extends ShardDefs, Ops> = {
 	[K in keyof Ops]: ServerImplConfig<D, Ops[K]>;
 };
 
+// ── Client impl configs (schema.client.ts) ───────────────────────────
+
+type CanRetryFn<D extends ShardDefs, TInput> = (
+	input: TInput,
+	freshShards: ShardAccessors<D>,
+	attemptCount: number,
+) => boolean;
+
+type ClientImplConfig<D extends ShardDefs, Meta> = Meta extends {
+	_input: infer TInput;
+}
+	? { readonly canRetry?: CanRetryFn<D, TInput> }
+	: never;
+
+/** Pre-compute ClientImplConfig for all operations in the Ops record */
+type ClientImplLookup<D extends ShardDefs, Ops> = {
+	[K in keyof Ops]: ClientImplConfig<D, Ops[K]>;
+};
+
 // ── Channel builder ──────────────────────────────────────────────────
 
 type ChannelKind = "durable" | "ephemeral";
@@ -242,6 +261,11 @@ export interface ChannelBuilder<
 		name: OName,
 		config: ServerImplLookup<D, Ops>[OName],
 	): ChannelBuilder<Kind, Name, D, Ops>;
+
+	clientImpl<OName extends string & keyof Ops>(
+		name: OName,
+		config: ClientImplLookup<D, Ops>[OName],
+	): ChannelBuilder<Kind, Name, D, Ops>;
 }
 
 // ── Channel constructors ─────────────────────────────────────────────
@@ -273,6 +297,9 @@ function createChannelBuilder<Kind extends ChannelKind, Name extends string>(
 			return builder as never;
 		},
 		serverImpl(_name, _config) {
+			return builder as never;
+		},
+		clientImpl(_name, _config) {
 			return builder as never;
 		},
 	};
