@@ -166,7 +166,51 @@ channel
 		},
 	});
 
-// ── 10. Operation with typed errors ──────────────────────────────────
+// ── 10. Negative: confirmed must NOT accept apply ────────────────────
+
+channel
+	.durable("game")
+	.shard("world", worldState)
+	.operation("badConfirmed", {
+		execution: "confirmed",
+		versionChecked: true,
+		deduplicate: true,
+		input: v.object({ id: v.string() }),
+		scope: () => [shard.ref("world")],
+		// @ts-expect-error: apply not allowed for confirmed operations
+		apply() {},
+	});
+
+// ── 11. Negative: computed must NOT accept apply ─────────────────────
+
+channel
+	.durable("game")
+	.shard("world", worldState)
+	.operation("badComputed", {
+		execution: "computed",
+		versionChecked: true,
+		deduplicate: true,
+		input: v.object({ id: v.string() }),
+		scope: () => [shard.ref("world")],
+		// @ts-expect-error: apply not allowed for computed operations
+		apply() {},
+	});
+
+// ── 12. Negative: optimistic must REQUIRE apply ──────────────────────
+
+channel
+	.durable("game")
+	.shard("world", worldState)
+	// @ts-expect-error: apply is required for optimistic operations
+	.operation("missingApply", {
+		execution: "optimistic",
+		versionChecked: true,
+		deduplicate: true,
+		input: v.object({}),
+		scope: () => [shard.ref("world")],
+	});
+
+// ── 13. Operation with typed errors ──────────────────────────────────
 
 channel
 	.durable("game")
