@@ -4,16 +4,11 @@ import type { ShardRef } from "./shard";
 
 // ── Shard type tracking ──────────────────────────────────────────────
 
-/**
- * Shard definitions are tracked as two plain object types mapping
- * shard name → state type. No index signatures — only explicit keys.
- */
 export interface ShardDefs {
 	readonly singletons: object;
 	readonly perResource: object;
 }
 
-/** Empty shard definitions — starting point for a new channel */
 interface EmptyShardDefs extends ShardDefs {
 	// biome-ignore lint/complexity/noBannedTypes: empty object for type accumulation via intersection
 	readonly singletons: {};
@@ -21,21 +16,18 @@ interface EmptyShardDefs extends ShardDefs {
 	readonly perResource: {};
 }
 
-/** Add a singleton shard to existing defs */
 type AddSingleton<D extends ShardDefs, Name extends string, State> = {
 	readonly singletons: D["singletons"] & Record<Name, State>;
 	readonly perResource: D["perResource"];
 };
 
-/** Add a per-resource shard to existing defs */
 type AddPerResource<D extends ShardDefs, Name extends string, State> = {
 	readonly singletons: D["singletons"];
 	readonly perResource: D["perResource"] & Record<Name, State>;
 };
 
-// ── Shard accessors in apply/validate/compute ────────────────────────
+// ── Shard accessors ──────────────────────────────────────────────────
 
-/** Build the shard accessor object from ShardDefs */
 export type ShardAccessors<D extends ShardDefs> = {
 	readonly [K in keyof D["singletons"]]: D["singletons"][K];
 } & {
@@ -44,22 +36,51 @@ export type ShardAccessors<D extends ShardDefs> = {
 	) => D["perResource"][K];
 };
 
-// ── Operation types ──────────────────────────────────────────────────
+export type ReadonlyShardAccessors<D extends ShardDefs> = ShardAccessors<D>;
 
-/** Context available in operation handlers */
+// ── Operation context ────────────────────────────────────────────────
+
 export interface OperationContext<TActor = { actorId: string }> {
 	readonly actor: TActor;
 	readonly channelId: string;
 }
 
-/** Operation config for optimistic operations (apply required in shared schema) */
-interface OptimisticOperationConfig<D extends ShardDefs, TInput> {
-	readonly execution: "optimistic";
+// ── Operation metadata (tracked in Ops type parameter) ───────────────
+
+type Execution = "optimistic" | "confirmed" | "computed";
+
+type ExtractErrors<E> = E extends StandardSchemaV1
+	? InferSchema<E> & string
+	: never;
+
+type ExtractServerResult<S> = S extends StandardSchemaV1
+	? InferSchema<S>
+	: undefined;
+
+interface OpMeta<
+	TExecution extends Execution = Execution,
+	TInput = unknown,
+	TErrorsSchema = undefined,
+	TServerResultSchema = undefined,
+> {
+	readonly _execution: TExecution;
+	readonly _input: TInput;
+	readonly _errorsSchema: TErrorsSchema;
+	readonly _serverResultSchema: TServerResultSchema;
+}
+
+// ── Shared operation configs (schema.ts) ─────────────────────────────
+
+interface BaseOperationFields<TInput> {
 	readonly versionChecked: boolean;
 	readonly deduplicate: boolean;
 	readonly input: StandardSchemaV1<TInput>;
-	readonly errors?: StandardSchemaV1;
 	readonly scope: (input: TInput, ctx: OperationContext) => readonly ShardRef[];
+}
+
+interface OptimisticOperationConfig<D extends ShardDefs, TInput>
+	extends BaseOperationFields<TInput> {
+	readonly execution: "optimistic";
 	readonly apply: (
 		shards: ShardAccessors<D>,
 		input: TInput,
@@ -68,32 +89,121 @@ interface OptimisticOperationConfig<D extends ShardDefs, TInput> {
 	) => void;
 }
 
-/** Operation config for confirmed operations (apply NOT allowed in shared schema) */
-interface ConfirmedOperationConfig<TInput> {
+interface ConfirmedOperationConfig<TInput> extends BaseOperationFields<TInput> {
 	readonly execution: "confirmed";
-	readonly versionChecked: boolean;
-	readonly deduplicate: boolean;
-	readonly input: StandardSchemaV1<TInput>;
-	readonly errors?: StandardSchemaV1;
-	readonly scope: (input: TInput, ctx: OperationContext) => readonly ShardRef[];
 }
 
-/** Operation config for computed operations (apply NOT allowed in shared schema) */
-interface ComputedOperationConfig<TInput> {
+interface ComputedOperationConfig<TInput> extends BaseOperationFields<TInput> {
 	readonly execution: "computed";
-	readonly versionChecked: boolean;
-	readonly deduplicate: boolean;
-	readonly input: StandardSchemaV1<TInput>;
-	readonly serverResult?: StandardSchemaV1;
-	readonly errors?: StandardSchemaV1;
-	readonly scope: (input: TInput, ctx: OperationContext) => readonly ShardRef[];
 }
 
-/** Union of all operation configs — execution flag determines which variant */
-type OperationConfig<D extends ShardDefs, TInput> =
-	| OptimisticOperationConfig<D, TInput>
-	| ConfirmedOperationConfig<TInput>
-	| ComputedOperationConfig<TInput>;
+/** Optional schema fields captured separately for type inference */
+interface SchemaFields<
+	TErrorsSchema extends StandardSchemaV1 | undefined = undefined,
+	TServerResultSchema extends StandardSchemaV1 | undefined = undefined,
+> {
+	readonly errors?: TErrorsSchema;
+	readonly serverResult?: TServerResultSchema;
+}
+
+// ── Server impl configs (schema.server.ts) ───────────────────────────
+
+type RejectFn<TErrors extends string> = (
+	code: TErrors,
+	message: string,
+) => never;
+
+interface ValidateContext<TErrors extends string> {
+	readonly reject: RejectFn<TErrors>;
+}
+
+interface OptimisticServerImplConfig<
+	D extends ShardDefs,
+	TInput,
+	TErrors extends string,
+> {
+	readonly validate?: (
+		shards: ReadonlyShardAccessors<D>,
+		input: TInput,
+		ctx: OperationContext,
+		tools: ValidateContext<TErrors>,
+	) => void;
+}
+
+interface ConfirmedServerImplConfig<
+	D extends ShardDefs,
+	TInput,
+	TErrors extends string,
+> {
+	readonly validate?: (
+		shards: ReadonlyShardAccessors<D>,
+		input: TInput,
+		ctx: OperationContext,
+		tools: ValidateContext<TErrors>,
+	) => void;
+	readonly apply: (
+		shards: ShardAccessors<D>,
+		input: TInput,
+		serverResult: undefined,
+		ctx: OperationContext,
+	) => void;
+}
+
+interface ComputedServerImplConfig<
+	D extends ShardDefs,
+	TInput,
+	TErrors extends string,
+	TServerResult,
+> {
+	readonly validate?: (
+		shards: ReadonlyShardAccessors<D>,
+		input: TInput,
+		ctx: OperationContext,
+		tools: ValidateContext<TErrors>,
+	) => void;
+	readonly compute?: (
+		shards: ReadonlyShardAccessors<D>,
+		input: TInput,
+		ctx: OperationContext,
+	) => TServerResult;
+	readonly apply: (
+		shards: ShardAccessors<D>,
+		input: TInput,
+		serverResult: TServerResult,
+		ctx: OperationContext,
+	) => void;
+}
+
+type ServerImplConfig<D extends ShardDefs, Meta> = Meta extends {
+	_execution: "optimistic";
+	_input: infer TInput;
+	_errorsSchema: infer TES;
+}
+	? OptimisticServerImplConfig<D, TInput, ExtractErrors<TES>>
+	: Meta extends {
+				_execution: "confirmed";
+				_input: infer TInput;
+				_errorsSchema: infer TES;
+			}
+		? ConfirmedServerImplConfig<D, TInput, ExtractErrors<TES>>
+		: Meta extends {
+					_execution: "computed";
+					_input: infer TInput;
+					_errorsSchema: infer TES;
+					_serverResultSchema: infer TSRS;
+				}
+			? ComputedServerImplConfig<
+					D,
+					TInput,
+					ExtractErrors<TES>,
+					ExtractServerResult<TSRS>
+				>
+			: never;
+
+/** Pre-compute ServerImplConfig for all operations in the Ops record */
+type ServerImplLookup<D extends ShardDefs, Ops> = {
+	[K in keyof Ops]: ServerImplConfig<D, Ops[K]>;
+};
 
 // ── Channel builder ──────────────────────────────────────────────────
 
@@ -103,27 +213,71 @@ export interface ChannelBuilder<
 	Kind extends ChannelKind,
 	Name extends string,
 	D extends ShardDefs,
+	Ops extends object = object,
 > {
 	readonly kind: Kind;
 	readonly name: Name;
 
-	/** Add a singleton shard (one instance per channel) */
 	shard<SName extends string, S extends StandardSchemaV1>(
 		name: SName,
 		schema: S,
-	): ChannelBuilder<Kind, Name, AddSingleton<D, SName, InferSchema<S>>>;
+	): ChannelBuilder<Kind, Name, AddSingleton<D, SName, InferSchema<S>>, Ops>;
 
-	/** Add a per-resource shard (one instance per resource ID) */
 	shardPerResource<SName extends string, S extends StandardSchemaV1>(
 		name: SName,
 		schema: S,
-	): ChannelBuilder<Kind, Name, AddPerResource<D, SName, InferSchema<S>>>;
+	): ChannelBuilder<Kind, Name, AddPerResource<D, SName, InferSchema<S>>, Ops>;
 
-	/** Define an operation on this channel */
-	operation<OName extends string, TInput>(
+	// Overload: optimistic
+	operation<
+		OName extends string,
+		TInput,
+		TES extends StandardSchemaV1 | undefined = undefined,
+	>(
 		name: OName,
-		config: OperationConfig<D, TInput>,
-	): ChannelBuilder<Kind, Name, D>;
+		config: OptimisticOperationConfig<D, TInput> & SchemaFields<TES, undefined>,
+	): ChannelBuilder<
+		Kind,
+		Name,
+		D,
+		Ops & Record<OName, OpMeta<"optimistic", TInput, TES, undefined>>
+	>;
+
+	// Overload: confirmed
+	operation<
+		OName extends string,
+		TInput,
+		TES extends StandardSchemaV1 | undefined = undefined,
+	>(
+		name: OName,
+		config: ConfirmedOperationConfig<TInput> & SchemaFields<TES, undefined>,
+	): ChannelBuilder<
+		Kind,
+		Name,
+		D,
+		Ops & Record<OName, OpMeta<"confirmed", TInput, TES, undefined>>
+	>;
+
+	// Overload: computed
+	operation<
+		OName extends string,
+		TInput,
+		TES extends StandardSchemaV1 | undefined = undefined,
+		TSRS extends StandardSchemaV1 | undefined = undefined,
+	>(
+		name: OName,
+		config: ComputedOperationConfig<TInput> & SchemaFields<TES, TSRS>,
+	): ChannelBuilder<
+		Kind,
+		Name,
+		D,
+		Ops & Record<OName, OpMeta<"computed", TInput, TES, TSRS>>
+	>;
+
+	serverImpl<OName extends string & keyof Ops>(
+		name: OName,
+		config: ServerImplLookup<D, Ops>[OName],
+	): ChannelBuilder<Kind, Name, D, Ops>;
 }
 
 // ── Channel constructors ─────────────────────────────────────────────
@@ -133,12 +287,15 @@ interface ChannelOptions {
 	readonly broadcastMode?: "patch" | "full";
 }
 
+// biome-ignore lint/complexity/noBannedTypes: empty object for type accumulation
+type EmptyOps = {};
+
 function createChannelBuilder<Kind extends ChannelKind, Name extends string>(
 	kind: Kind,
 	name: Name,
 	_options?: ChannelOptions,
-): ChannelBuilder<Kind, Name, EmptyShardDefs> {
-	const builder: ChannelBuilder<Kind, Name, EmptyShardDefs> = {
+): ChannelBuilder<Kind, Name, EmptyShardDefs, EmptyOps> {
+	const builder: ChannelBuilder<Kind, Name, EmptyShardDefs, EmptyOps> = {
 		kind,
 		name,
 		shard(_name, _schema) {
@@ -147,7 +304,11 @@ function createChannelBuilder<Kind extends ChannelKind, Name extends string>(
 		shardPerResource(_name, _schema) {
 			return builder as never;
 		},
-		operation(_name, _config) {
+		// biome-ignore lint/suspicious/noExplicitAny: overloaded method needs loose impl signature
+		operation(_name: string, _config: any) {
+			return builder as never;
+		},
+		serverImpl(_name, _config) {
 			return builder as never;
 		},
 	};

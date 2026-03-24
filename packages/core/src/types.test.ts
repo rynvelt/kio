@@ -172,12 +172,12 @@ channel
 	.durable("game")
 	.shard("world", worldState)
 	.operation("badConfirmed", {
+		// @ts-expect-error: apply not allowed for confirmed — no overload matches
 		execution: "confirmed",
 		versionChecked: true,
 		deduplicate: true,
 		input: v.object({ id: v.string() }),
 		scope: () => [shard.ref("world")],
-		// @ts-expect-error: apply not allowed for confirmed operations
 		apply() {},
 	});
 
@@ -192,7 +192,7 @@ channel
 		deduplicate: true,
 		input: v.object({ id: v.string() }),
 		scope: () => [shard.ref("world")],
-		// @ts-expect-error: apply not allowed for computed operations
+		// @ts-expect-error: apply not allowed for computed — no overload matches
 		apply() {},
 	});
 
@@ -201,8 +201,8 @@ channel
 channel
 	.durable("game")
 	.shard("world", worldState)
-	// @ts-expect-error: apply is required for optimistic operations
 	.operation("missingApply", {
+		// @ts-expect-error: apply is required for optimistic — no overload matches
 		execution: "optimistic",
 		versionChecked: true,
 		deduplicate: true,
@@ -210,7 +210,7 @@ channel
 		scope: () => [shard.ref("world")],
 	});
 
-// ── 13. Operation with typed errors ──────────────────────────────────
+// ── 13. serverImpl for optimistic — validate with typed reject ───────
 
 channel
 	.durable("game")
@@ -229,4 +229,150 @@ channel
 				1,
 			);
 		},
+	})
+	.serverImpl("useItem", {
+		validate(shards, input, _ctx, { reject }) {
+			const item = shards
+				.seat(input.seatId)
+				.inventory.find((i) => i.id === input.itemId);
+			if (!item) return reject("ITEM_NOT_FOUND", "Item not in inventory");
+			if (item.name.length < 1)
+				return reject("INSUFFICIENT_QUANTITY", "No uses left");
+		},
 	});
+
+// ── 14. serverImpl for confirmed — apply required ────────────────────
+
+channel
+	.durable("game")
+	.shard("world", worldState)
+	.shardPerResource("seat", seatState)
+	.operation("chooseDialogue", {
+		execution: "confirmed",
+		versionChecked: true,
+		deduplicate: true,
+		input: v.object({
+			seatId: v.string(),
+			dialogueId: v.string(),
+			optionIndex: v.number(),
+		}),
+		errors: v.picklist(["DIALOGUE_NOT_ACTIVE", "INVALID_OPTION"]),
+		scope: (input) => [shard.ref("seat", input.seatId)],
+	})
+	.serverImpl("chooseDialogue", {
+		validate(_shards, _input, _ctx, { reject }) {
+			// reject is typed — only declared codes allowed
+			return reject("DIALOGUE_NOT_ACTIVE", "No active dialogue");
+		},
+		apply(shards, input) {
+			// shards and input are correctly typed
+			const _seat = shards.seat(input.seatId);
+		},
+	});
+
+// ── 15. serverImpl for computed — compute + apply ────────────────────
+
+channel
+	.durable("game")
+	.shard("world", worldState)
+	.operation("rollDice", {
+		execution: "computed",
+		versionChecked: true,
+		deduplicate: true,
+		input: v.object({
+			dice: v.array(v.object({ max: v.number() })),
+			target: v.string(),
+		}),
+		errors: v.picklist(["NOT_PLAYING"]),
+		serverResult: v.object({ results: v.array(v.number()) }),
+		scope: () => [shard.ref("world")],
+	})
+	.serverImpl("rollDice", {
+		validate(shards, _input, _ctx, { reject }) {
+			if (shards.world.gameStage !== "PLAYING")
+				return reject("NOT_PLAYING", "Game is not active");
+		},
+		compute(_shards, input) {
+			return {
+				results: input.dice.map((d) => Math.floor(Math.random() * d.max) + 1),
+			};
+		},
+		apply(shards, input, serverResult) {
+			const _stage = shards.world.gameStage;
+			const _target = input.target;
+			const _results: number[] = serverResult.results;
+		},
+	});
+
+// ── 16. Negative: serverImpl reject() rejects undeclared error codes ─
+
+channel
+	.durable("game")
+	.shard("world", worldState)
+	.operation("typed", {
+		execution: "confirmed",
+		versionChecked: true,
+		deduplicate: true,
+		input: v.object({ id: v.string() }),
+		errors: v.picklist(["NOT_FOUND", "EXPIRED"]),
+		scope: () => [shard.ref("world")],
+	})
+	.serverImpl("typed", {
+		validate(_shards, _input, _ctx, { reject }) {
+			reject("NOT_FOUND", "ok"); // valid
+			// @ts-expect-error: "INVALID" is not in the errors picklist
+			reject("INVALID", "bad");
+		},
+		apply() {},
+	});
+
+// ── 17. Negative: serverImpl for optimistic must NOT accept apply ────
+
+channel
+	.durable("game")
+	.shard("world", worldState)
+	.operation("optOp", {
+		execution: "optimistic",
+		versionChecked: true,
+		deduplicate: true,
+		input: v.object({}),
+		scope: () => [shard.ref("world")],
+		apply() {},
+	})
+	.serverImpl("optOp", {
+		// @ts-expect-error: apply not allowed in serverImpl for optimistic
+		apply() {},
+	});
+
+// ── 18. Negative: serverImpl for confirmed must REQUIRE apply ────────
+
+channel
+	.durable("game")
+	.shard("world", worldState)
+	.operation("confOp", {
+		execution: "confirmed",
+		versionChecked: true,
+		deduplicate: true,
+		input: v.object({}),
+		scope: () => [shard.ref("world")],
+	})
+	// @ts-expect-error: apply is required in serverImpl for confirmed
+	.serverImpl("confOp", {
+		validate() {},
+	});
+
+// ── 19. Negative: serverImpl for non-existent operation ──────────────
+
+channel
+	.durable("game")
+	.shard("world", worldState)
+	.operation("exists", {
+		execution: "optimistic",
+		versionChecked: true,
+		deduplicate: true,
+		input: v.object({}),
+		scope: () => [shard.ref("world")],
+		apply() {},
+	})
+	// @ts-expect-error: "doesNotExist" is not a defined operation
+	.serverImpl("doesNotExist", {});
