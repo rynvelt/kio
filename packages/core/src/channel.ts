@@ -9,12 +9,8 @@ export interface ShardDefs {
 	readonly perResource: object;
 }
 
-interface EmptyShardDefs extends ShardDefs {
-	// biome-ignore lint/complexity/noBannedTypes: empty object for type accumulation via intersection
-	readonly singletons: {};
-	// biome-ignore lint/complexity/noBannedTypes: empty object for type accumulation via intersection
-	readonly perResource: {};
-}
+// biome-ignore lint/complexity/noBannedTypes: empty object for type accumulation via intersection
+type EmptyShardDefs = { readonly singletons: {}; readonly perResource: {} };
 
 type AddSingleton<D extends ShardDefs, Name extends string, State> = {
 	readonly singletons: D["singletons"] & Record<Name, State>;
@@ -36,8 +32,6 @@ export type ShardAccessors<D extends ShardDefs> = {
 	) => D["perResource"][K];
 };
 
-export type ReadonlyShardAccessors<D extends ShardDefs> = ShardAccessors<D>;
-
 // ── Operation context ────────────────────────────────────────────────
 
 export interface OperationContext<TActor = { actorId: string }> {
@@ -58,10 +52,10 @@ type ExtractServerResult<S> = S extends StandardSchemaV1
 	: undefined;
 
 interface OpMeta<
-	TExecution extends Execution = Execution,
-	TInput = unknown,
-	TErrorsSchema = undefined,
-	TServerResultSchema = undefined,
+	TExecution extends Execution,
+	TInput,
+	TErrorsSchema,
+	TServerResultSchema,
 > {
 	readonly _execution: TExecution;
 	readonly _input: TInput;
@@ -97,8 +91,12 @@ interface ComputedOperationConfig<TInput> extends BaseOperationFields<TInput> {
 	readonly execution: "computed";
 }
 
-/** Optional schema fields captured separately for type inference */
-interface SchemaFields<
+/**
+ * Errors and serverResult schemas are captured as separate generics
+ * rather than through the config interfaces, because TypeScript can't
+ * infer types through StandardSchemaV1's optional `types` property.
+ */
+interface InferredSchemaFields<
 	TErrorsSchema extends StandardSchemaV1 | undefined = undefined,
 	TServerResultSchema extends StandardSchemaV1 | undefined = undefined,
 > {
@@ -113,92 +111,56 @@ type RejectFn<TErrors extends string> = (
 	message: string,
 ) => never;
 
-interface ValidateContext<TErrors extends string> {
-	readonly reject: RejectFn<TErrors>;
-}
+type ValidateFn<D extends ShardDefs, TInput, TErrors extends string> = (
+	shards: ShardAccessors<D>,
+	input: TInput,
+	ctx: OperationContext,
+	tools: { readonly reject: RejectFn<TErrors> },
+) => void;
 
-interface OptimisticServerImplConfig<
-	D extends ShardDefs,
-	TInput,
-	TErrors extends string,
-> {
-	readonly validate?: (
-		shards: ReadonlyShardAccessors<D>,
-		input: TInput,
-		ctx: OperationContext,
-		tools: ValidateContext<TErrors>,
-	) => void;
-}
+type ApplyFn<D extends ShardDefs, TInput, TServerResult> = (
+	shards: ShardAccessors<D>,
+	input: TInput,
+	serverResult: TServerResult,
+	ctx: OperationContext,
+) => void;
 
-interface ConfirmedServerImplConfig<
-	D extends ShardDefs,
-	TInput,
-	TErrors extends string,
-> {
-	readonly validate?: (
-		shards: ReadonlyShardAccessors<D>,
-		input: TInput,
-		ctx: OperationContext,
-		tools: ValidateContext<TErrors>,
-	) => void;
-	readonly apply: (
-		shards: ShardAccessors<D>,
-		input: TInput,
-		serverResult: undefined,
-		ctx: OperationContext,
-	) => void;
-}
+type ComputeFn<D extends ShardDefs, TInput, TServerResult> = (
+	shards: ShardAccessors<D>,
+	input: TInput,
+	ctx: OperationContext,
+) => TServerResult;
 
-interface ComputedServerImplConfig<
+/** Maps execution type → required server impl shape */
+type ServerImplMap<
 	D extends ShardDefs,
 	TInput,
 	TErrors extends string,
 	TServerResult,
-> {
-	readonly validate?: (
-		shards: ReadonlyShardAccessors<D>,
-		input: TInput,
-		ctx: OperationContext,
-		tools: ValidateContext<TErrors>,
-	) => void;
-	readonly compute?: (
-		shards: ReadonlyShardAccessors<D>,
-		input: TInput,
-		ctx: OperationContext,
-	) => TServerResult;
-	readonly apply: (
-		shards: ShardAccessors<D>,
-		input: TInput,
-		serverResult: TServerResult,
-		ctx: OperationContext,
-	) => void;
-}
+> = {
+	optimistic: {
+		readonly validate?: ValidateFn<D, TInput, TErrors>;
+	};
+	confirmed: {
+		readonly validate?: ValidateFn<D, TInput, TErrors>;
+		readonly apply: ApplyFn<D, TInput, undefined>;
+	};
+	computed: {
+		readonly validate?: ValidateFn<D, TInput, TErrors>;
+		readonly compute?: ComputeFn<D, TInput, TServerResult>;
+		readonly apply: ApplyFn<D, TInput, TServerResult>;
+	};
+};
 
+/** Resolve server impl config from operation metadata */
 type ServerImplConfig<D extends ShardDefs, Meta> = Meta extends {
-	_execution: "optimistic";
+	_execution: infer E extends Execution;
 	_input: infer TInput;
 	_errorsSchema: infer TES;
+	_serverResultSchema: infer TSRS;
 }
-	? OptimisticServerImplConfig<D, TInput, ExtractErrors<TES>>
-	: Meta extends {
-				_execution: "confirmed";
-				_input: infer TInput;
-				_errorsSchema: infer TES;
-			}
-		? ConfirmedServerImplConfig<D, TInput, ExtractErrors<TES>>
-		: Meta extends {
-					_execution: "computed";
-					_input: infer TInput;
-					_errorsSchema: infer TES;
-					_serverResultSchema: infer TSRS;
-				}
-			? ComputedServerImplConfig<
-					D,
-					TInput,
-					ExtractErrors<TES>,
-					ExtractServerResult<TSRS>
-				>
-			: never;
+	? ServerImplMap<D, TInput, ExtractErrors<TES>, ExtractServerResult<TSRS>>[E]
+	: never;
 
 /** Pre-compute ServerImplConfig for all operations in the Ops record */
 type ServerImplLookup<D extends ShardDefs, Ops> = {
@@ -235,7 +197,8 @@ export interface ChannelBuilder<
 		TES extends StandardSchemaV1 | undefined = undefined,
 	>(
 		name: OName,
-		config: OptimisticOperationConfig<D, TInput> & SchemaFields<TES, undefined>,
+		config: OptimisticOperationConfig<D, TInput> &
+			InferredSchemaFields<TES, undefined>,
 	): ChannelBuilder<
 		Kind,
 		Name,
@@ -250,7 +213,8 @@ export interface ChannelBuilder<
 		TES extends StandardSchemaV1 | undefined = undefined,
 	>(
 		name: OName,
-		config: ConfirmedOperationConfig<TInput> & SchemaFields<TES, undefined>,
+		config: ConfirmedOperationConfig<TInput> &
+			InferredSchemaFields<TES, undefined>,
 	): ChannelBuilder<
 		Kind,
 		Name,
@@ -266,7 +230,7 @@ export interface ChannelBuilder<
 		TSRS extends StandardSchemaV1 | undefined = undefined,
 	>(
 		name: OName,
-		config: ComputedOperationConfig<TInput> & SchemaFields<TES, TSRS>,
+		config: ComputedOperationConfig<TInput> & InferredSchemaFields<TES, TSRS>,
 	): ChannelBuilder<
 		Kind,
 		Name,
