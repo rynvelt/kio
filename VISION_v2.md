@@ -8,6 +8,7 @@ Not a communication library — typing messages and sending them over a wire is 
 
 ## 1. Data Model
 
+<!-- TRANSFERRED: concepts/channels.md -->
 ### Channels — "What consistency model does this state need?"
 
 A real-time application typically has different kinds of state with fundamentally different requirements:
@@ -24,6 +25,7 @@ A **channel** groups state that shares the same consistency model:
 
 One connection can participate in multiple channels.
 
+<!-- TRANSFERRED: concepts/channels.md -->
 #### Broadcast control
 
 By default, every applied operation immediately broadcasts the new shard state to all subscribers (`autoBroadcast: true`). For channels with high-frequency, low-urgency updates — presence, cursor positions, viewport state — the consumer can disable automatic broadcasting and control when broadcasts go out:
@@ -59,6 +61,7 @@ setInterval(() => {
 server.broadcastDirtyShards("presence", [`player:${newPlayerId}`])
 ```
 
+<!-- TRANSFERRED: concepts/channels.md -->
 #### Ephemeral channel semantics
 
 Ephemeral channels differ from durable channels in several important ways:
@@ -78,6 +81,7 @@ Ephemeral channels differ from durable channels in several important ways:
 
 **Shard creation:** Ephemeral shards are created in memory on first write. When the server submits a presence operation for a player that has no shard yet, the engine creates it. No persistence adapter involved.
 
+<!-- TRANSFERRED: concepts/shards.md -->
 ### Shards — "Which parts of the state can change independently?"
 
 Within a channel, not all state contends with all other state. Consider a 5-player game:
@@ -108,6 +112,7 @@ room:abc    | seat:2:inventory     | 9       | { ... }
 
 Single-shard operations use a single compare-and-swap. Cross-shard operations (like item transfer) use a multi-row atomic write. Both are straightforward in SQL.
 
+<!-- TRANSFERRED: concepts/shards.md -->
 ### State Ownership — "What happens when someone disconnects?"
 
 Shards are keyed by stable IDs that the consumer chooses — not by connection IDs. Connections are transient (they come and go), but state needs to outlive them.
@@ -122,6 +127,7 @@ The engine doesn't know or care what shard IDs represent. The consumer controls 
 - Reassigning state to a different connection
 - Read-only spectators (authorize reads but not writes)
 
+<!-- TRANSFERRED: concepts/subscriptions.md -->
 ### Subscription Shard — "What is this actor allowed to subscribe to?"
 
 The engine maintains a built-in **subscription shard** per actor — a per-resource shard on a dedicated `subscriptions` channel. It tracks which shards the actor is allowed to subscribe to (read). This is the source of truth for read access and drives the engine's default authorization and initial subscription behavior.

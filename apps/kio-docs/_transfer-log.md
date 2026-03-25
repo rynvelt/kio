@@ -14,12 +14,12 @@ tracking transfer progress.
 
 | Chunk | VISION_v2 Section | Subsection | Lines | Target Page(s) | Status |
 |---|---|---|---|---|---|
-| 1 | §1 Data Model | Channels intro (L9–L25) | 9–25 | concepts/channels.md | Not Started |
-| 1 | §1 Data Model | Broadcast control (L26–L60) | 26–60 | concepts/channels.md | Not Started |
-| 1 | §1 Data Model | Ephemeral channel semantics (L62–L79) | 62–79 | concepts/channels.md | Not Started |
-| 1 | §1 Data Model | Shards intro (L81–L109) | 81–109 | concepts/shards.md | Not Started |
-| 1 | §1 Data Model | State Ownership (L111–L124) | 111–124 | concepts/shards.md | Not Started |
-| 1 | §1 Data Model | Subscription Shard (L125–L197) | 125–197 | concepts/subscriptions.md | Not Started |
+| 1 | §1 Data Model | Channels intro (L9–L25) | 9–25 | concepts/channels.md | Done |
+| 1 | §1 Data Model | Broadcast control (L26–L60) | 26–60 | concepts/channels.md | Done |
+| 1 | §1 Data Model | Ephemeral channel semantics (L62–L79) | 62–79 | concepts/channels.md | Done |
+| 1 | §1 Data Model | Shards intro (L81–L109) | 81–109 | concepts/shards.md | Done |
+| 1 | §1 Data Model | State Ownership (L111–L124) | 111–124 | concepts/shards.md | Done |
+| 1 | §1 Data Model | Subscription Shard (L125–L197) | 125–197 | concepts/subscriptions.md | Done |
 | 2 | §2 Operations | What is an operation (L200–L253) | 200–253 | concepts/operations.md | Not Started |
 | 2 | §2 Operations | Operation Flags (L255–L311) | 255–311 | concepts/operation-flags.md | Not Started |
 | 2 | §2 Operations | Submit Result (L313–L343) | 313–343 | concepts/operations.md | Not Started |
