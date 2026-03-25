@@ -4,7 +4,8 @@
  */
 
 import * as v from "valibot";
-import { channel, shard } from "./index";
+import type { ShardState, SubmitResult } from "./index";
+import { channel, engine, shard } from "./index";
 
 // ── Type assertion helpers ───────────────────────────────────────────
 
@@ -486,3 +487,69 @@ channel
 			const _seat = shards.seat(input.seatId);
 		},
 	});
+
+// ── 25. engine() accumulates channels ────────────────────────────────
+
+const gameChannelForEngine = channel
+	.durable("game")
+	.shard("world", worldState)
+	.shardPerResource("seat", seatState)
+	.operation("visit", {
+		execution: "optimistic",
+		versionChecked: true,
+		deduplicate: true,
+		input: v.object({ seatId: v.string() }),
+		scope: (input) => [shard.ref("seat", input.seatId)],
+		apply(shards, input) {
+			shards.seat(input.seatId).visitedLocations.add("test");
+		},
+	});
+
+const presChannel = channel
+	.ephemeral("presence", { autoBroadcast: false })
+	.shardPerResource("player", presenceState)
+	.operation("updateLocation", {
+		execution: "optimistic",
+		versionChecked: false,
+		deduplicate: false,
+		input: v.object({
+			gps: v.object({ lat: v.number(), lng: v.number() }),
+		}),
+		scope: (_input, ctx) => [shard.ref("player", ctx.actor.actorId)],
+		apply(shards, input, _sr, ctx) {
+			const me = shards.player(ctx.actor.actorId);
+			me.gps = input.gps;
+		},
+	});
+
+const _serverEngine = engine()
+	.channel(gameChannelForEngine)
+	.channel(presChannel);
+const _clientEngine = engine()
+	.channel(gameChannelForEngine)
+	.channel(presChannel);
+
+// ── 26. SubmitResult discriminated union ─────────────────────────────
+
+function _handleResult(result: SubmitResult<"NOT_FOUND" | "EXPIRED">) {
+	if (result.status === "acknowledged") {
+		// no error
+	} else if (result.status === "rejected") {
+		const _code: "NOT_FOUND" | "EXPIRED" | string = result.error.code;
+		const _msg: string = result.error.message;
+	} else if (result.status === "blocked") {
+		const _code: "PENDING_OPERATION" = result.error.code;
+	}
+}
+
+// ── 27. ShardState discriminated union ───────────────────────────────
+
+function _handleShardState(s: ShardState<{ items: string[] }>) {
+	if (s.syncStatus === "unavailable" || s.syncStatus === "loading") {
+		const _null: null = s.state;
+		const _noPending: null = s.pending;
+	} else {
+		// stale or latest — state is T
+		const _items: string[] = s.state.items;
+	}
+}
