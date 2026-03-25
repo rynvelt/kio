@@ -23,3 +23,11 @@ fix:
 # Run tests
 test:
     @bun test
+
+# Start docs dev server
+docs-dev:
+    @cd {{root_dir}}/apps/kio-docs && bunx astro dev
+
+# Build docs
+docs-build:
+    @cd {{root_dir}}/apps/kio-docs && bunx astro build

@@ -4,7 +4,8 @@
 	"type": "module",
 	"workspaces": [
 		"packages/*",
-		"examples/*"
+		"examples/*",
+		"apps/*"
 	],
 	"devDependencies": {
 		"@biomejs/biome": "^2.4.8",
