@@ -11,6 +11,14 @@
         "typescript": "^5",
       },
     },
+    "examples/streetescapes": {
+      "name": "@kio/example-streetescapes",
+      "version": "0.0.1",
+      "dependencies": {
+        "@kio/core": "workspace:*",
+        "valibot": "^1",
+      },
+    },
     "packages/client": {
       "name": "@kio/client",
       "version": "0.0.1",
@@ -57,6 +65,8 @@
     "@kio/client": ["@kio/client@workspace:packages/client"],
 
     "@kio/core": ["@kio/core@workspace:packages/core"],
+
+    "@kio/example-streetescapes": ["@kio/example-streetescapes@workspace:examples/streetescapes"],
 
     "@kio/server": ["@kio/server@workspace:packages/server"],
 

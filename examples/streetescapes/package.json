@@ -1,0 +1,10 @@
+{
+	"name": "@kio/example-streetescapes",
+	"version": "0.0.1",
+	"private": true,
+	"type": "module",
+	"dependencies": {
+		"@kio/core": "workspace:*",
+		"valibot": "^1"
+	}
+}

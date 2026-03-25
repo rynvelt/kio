@@ -3,6 +3,7 @@
 	"references": [
 		{ "path": "./packages/core" },
 		{ "path": "./packages/server" },
-		{ "path": "./packages/client" }
+		{ "path": "./packages/client" },
+		{ "path": "./examples/streetescapes" }
 	]
 }

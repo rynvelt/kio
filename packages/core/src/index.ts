@@ -1,6 +1,7 @@
 export type {
 	ChannelBuilder,
 	OperationContext,
+	OpMeta,
 	ScopedShardAccessors,
 	ShardAccessors,
 	ShardDefs,

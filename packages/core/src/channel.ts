@@ -61,7 +61,7 @@ type ExtractServerResult<S> = S extends StandardSchemaV1
 	? InferSchema<S>
 	: undefined;
 
-interface OpMeta<
+export interface OpMeta<
 	TExecution extends Execution,
 	TInput,
 	TErrorsSchema,
