@@ -1,9 +1,14 @@
 export type {
 	ChannelBuilder,
+	ChannelData,
+	ClientImplDefinition,
 	OperationContext,
+	OperationDefinition,
 	OpMeta,
 	ScopedShardAccessors,
+	ServerImplDefinition,
 	ShardAccessors,
+	ShardDefinition,
 	ShardDefs,
 } from "./channel";
 export { channel } from "./channel";

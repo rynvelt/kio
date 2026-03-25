@@ -2,6 +2,56 @@ import type { StandardSchemaV1 } from "@standard-schema/spec";
 import type { InferSchema } from "./schema";
 import type { ShardRef } from "./shard";
 
+// ── Runtime data structures ──────────────────────────────────────────
+
+export interface ShardDefinition {
+	readonly name: string;
+	readonly kind: "singleton" | "perResource";
+	readonly schema: StandardSchemaV1;
+}
+
+export interface OperationDefinition {
+	readonly name: string;
+	readonly execution: "optimistic" | "confirmed" | "computed";
+	readonly versionChecked: boolean;
+	readonly deduplicate: boolean;
+	readonly inputSchema: StandardSchemaV1;
+	readonly errorsSchema: StandardSchemaV1 | undefined;
+	readonly serverResultSchema: StandardSchemaV1 | undefined;
+	readonly scope: (input: unknown, ctx: unknown) => readonly ShardRef[];
+	readonly apply:
+		| ((
+				shards: unknown,
+				input: unknown,
+				serverResult: unknown,
+				ctx: unknown,
+		  ) => void)
+		| undefined;
+}
+
+export interface ServerImplDefinition {
+	readonly validate: ((...args: readonly unknown[]) => void) | undefined;
+	readonly compute: ((...args: readonly unknown[]) => unknown) | undefined;
+	readonly apply: ((...args: readonly unknown[]) => void) | undefined;
+}
+
+export interface ClientImplDefinition {
+	readonly canRetry:
+		| ((input: unknown, freshShards: unknown, attemptCount: number) => boolean)
+		| undefined;
+}
+
+/** Runtime data collected by the builder — accessible to the engine */
+export interface ChannelData {
+	readonly kind: "durable" | "ephemeral";
+	readonly name: string;
+	readonly options: ChannelOptions;
+	readonly shardDefs: ReadonlyMap<string, ShardDefinition>;
+	readonly operations: ReadonlyMap<string, OperationDefinition>;
+	readonly serverImpls: ReadonlyMap<string, ServerImplDefinition>;
+	readonly clientImpls: ReadonlyMap<string, ClientImplDefinition>;
+}
+
 // ── Shard type tracking ──────────────────────────────────────────────
 
 export interface ShardDefs {
@@ -225,6 +275,7 @@ export interface ChannelBuilder<
 > {
 	readonly kind: Kind;
 	readonly name: Name;
+	readonly "~data": ChannelData;
 
 	shard<SName extends string, S extends StandardSchemaV1>(
 		name: SName,
@@ -312,29 +363,78 @@ type EmptyOps = {};
 function createChannelBuilder<Kind extends ChannelKind, Name extends string>(
 	kind: Kind,
 	name: Name,
-	_options?: ChannelOptions,
+	options?: ChannelOptions,
 ): ChannelBuilder<Kind, Name, EmptyShardDefs, EmptyOps> {
-	const builder: ChannelBuilder<Kind, Name, EmptyShardDefs, EmptyOps> = {
+	const shardDefs = new Map<string, ShardDefinition>();
+	const operations = new Map<string, OperationDefinition>();
+	const serverImpls = new Map<string, ServerImplDefinition>();
+	const clientImpls = new Map<string, ClientImplDefinition>();
+
+	const data: ChannelData = {
 		kind,
 		name,
-		shard(_name, _schema) {
-			return builder as never;
+		options: options ?? {},
+		shardDefs,
+		operations,
+		serverImpls,
+		clientImpls,
+	};
+
+	const builder = {
+		kind,
+		name,
+		"~data": data,
+
+		shard(shardName: string, schema: StandardSchemaV1) {
+			shardDefs.set(shardName, { name: shardName, kind: "singleton", schema });
+			return builder;
 		},
-		shardPerResource(_name, _schema) {
-			return builder as never;
+
+		shardPerResource(shardName: string, schema: StandardSchemaV1) {
+			shardDefs.set(shardName, {
+				name: shardName,
+				kind: "perResource",
+				schema,
+			});
+			return builder;
 		},
+
 		// biome-ignore lint/suspicious/noExplicitAny: overloaded method needs loose impl signature
-		operation(_name: string, _config: any) {
-			return builder as never;
+		operation(opName: string, config: any) {
+			operations.set(opName, {
+				name: opName,
+				execution: config.execution,
+				versionChecked: config.versionChecked,
+				deduplicate: config.deduplicate,
+				inputSchema: config.input,
+				errorsSchema: config.errors ?? undefined,
+				serverResultSchema: config.serverResult ?? undefined,
+				scope: config.scope,
+				apply: config.apply ?? undefined,
+			});
+			return builder;
 		},
-		serverImpl(_name, _config) {
-			return builder as never;
+
+		// biome-ignore lint/suspicious/noExplicitAny: server impl config shape varies by execution type
+		serverImpl(opName: string, config: any) {
+			serverImpls.set(opName, {
+				validate: config.validate ?? undefined,
+				compute: config.compute ?? undefined,
+				apply: config.apply ?? undefined,
+			});
+			return builder;
 		},
-		clientImpl(_name, _config) {
-			return builder as never;
+
+		// biome-ignore lint/suspicious/noExplicitAny: client impl config shape varies
+		clientImpl(opName: string, config: any) {
+			clientImpls.set(opName, {
+				canRetry: config.canRetry ?? undefined,
+			});
+			return builder;
 		},
 	};
-	return builder;
+
+	return builder as never;
 }
 
 export const channel = {

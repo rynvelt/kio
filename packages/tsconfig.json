@@ -6,6 +6,7 @@
 		"declaration": true,
 		"declarationMap": true,
 		"emitDeclarationOnly": true,
-		"noEmitOnError": true
+		"noEmitOnError": true,
+		"types": ["@types/bun"]
 	}
 }
