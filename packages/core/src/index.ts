@@ -1,6 +1,7 @@
 export type {
 	ChannelBuilder,
 	OperationContext,
+	ScopedShardAccessors,
 	ShardAccessors,
 	ShardDefs,
 } from "./channel";

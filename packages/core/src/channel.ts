@@ -24,10 +24,20 @@ type AddPerResource<D extends ShardDefs, Name extends string, State> = {
 
 // ── Shard accessors ──────────────────────────────────────────────────
 
+/** Full shard accessors — all shards on the channel */
 export type ShardAccessors<D extends ShardDefs> = {
 	readonly [K in keyof D["singletons"]]: D["singletons"][K];
 } & {
 	readonly [K in keyof D["perResource"]]: (
+		resourceId: string,
+	) => D["perResource"][K];
+};
+
+/** Narrowed shard accessors — only shard types declared in scope */
+export type ScopedShardAccessors<D extends ShardDefs, TNames extends string> = {
+	readonly [K in keyof D["singletons"] & TNames]: D["singletons"][K];
+} & {
+	readonly [K in keyof D["perResource"] & TNames]: (
 		resourceId: string,
 	) => D["perResource"][K];
 };
@@ -65,30 +75,47 @@ interface OpMeta<
 
 // ── Shared operation configs (schema.ts) ─────────────────────────────
 
-interface BaseOperationFields<TInput> {
+interface OptimisticOperationConfig<
+	D extends ShardDefs,
+	TInput,
+	TScopeNames extends string,
+> {
+	readonly execution: "optimistic";
 	readonly versionChecked: boolean;
 	readonly deduplicate: boolean;
 	readonly input: StandardSchemaV1<TInput>;
-	readonly scope: (input: TInput, ctx: OperationContext) => readonly ShardRef[];
-}
-
-interface OptimisticOperationConfig<D extends ShardDefs, TInput>
-	extends BaseOperationFields<TInput> {
-	readonly execution: "optimistic";
+	readonly scope: (
+		input: TInput,
+		ctx: OperationContext,
+	) => readonly ShardRef<TScopeNames>[];
 	readonly apply: (
-		shards: ShardAccessors<D>,
+		shards: ScopedShardAccessors<D, TScopeNames>,
 		input: TInput,
 		serverResult: undefined,
 		ctx: OperationContext,
 	) => void;
 }
 
-interface ConfirmedOperationConfig<TInput> extends BaseOperationFields<TInput> {
+interface ConfirmedOperationConfig<TInput, TScopeNames extends string> {
 	readonly execution: "confirmed";
+	readonly versionChecked: boolean;
+	readonly deduplicate: boolean;
+	readonly input: StandardSchemaV1<TInput>;
+	readonly scope: (
+		input: TInput,
+		ctx: OperationContext,
+	) => readonly ShardRef<TScopeNames>[];
 }
 
-interface ComputedOperationConfig<TInput> extends BaseOperationFields<TInput> {
+interface ComputedOperationConfig<TInput, TScopeNames extends string> {
 	readonly execution: "computed";
+	readonly versionChecked: boolean;
+	readonly deduplicate: boolean;
+	readonly input: StandardSchemaV1<TInput>;
+	readonly scope: (
+		input: TInput,
+		ctx: OperationContext,
+	) => readonly ShardRef<TScopeNames>[];
 }
 
 /**
@@ -213,10 +240,11 @@ export interface ChannelBuilder<
 	operation<
 		OName extends string,
 		TInput,
+		TScopeNames extends string,
 		TES extends StandardSchemaV1 | undefined = undefined,
 	>(
 		name: OName,
-		config: OptimisticOperationConfig<D, TInput> &
+		config: OptimisticOperationConfig<D, TInput, TScopeNames> &
 			InferredSchemaFields<TES, undefined>,
 	): ChannelBuilder<
 		Kind,
@@ -229,10 +257,11 @@ export interface ChannelBuilder<
 	operation<
 		OName extends string,
 		TInput,
+		TScopeNames extends string,
 		TES extends StandardSchemaV1 | undefined = undefined,
 	>(
 		name: OName,
-		config: ConfirmedOperationConfig<TInput> &
+		config: ConfirmedOperationConfig<TInput, TScopeNames> &
 			InferredSchemaFields<TES, undefined>,
 	): ChannelBuilder<
 		Kind,
@@ -245,11 +274,13 @@ export interface ChannelBuilder<
 	operation<
 		OName extends string,
 		TInput,
+		TScopeNames extends string,
 		TES extends StandardSchemaV1 | undefined = undefined,
 		TSRS extends StandardSchemaV1 | undefined = undefined,
 	>(
 		name: OName,
-		config: ComputedOperationConfig<TInput> & InferredSchemaFields<TES, TSRS>,
+		config: ComputedOperationConfig<TInput, TScopeNames> &
+			InferredSchemaFields<TES, TSRS>,
 	): ChannelBuilder<
 		Kind,
 		Name,

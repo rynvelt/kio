@@ -72,12 +72,12 @@ channel
 		input: v.object({ seatId: v.string(), locationSlug: v.string() }),
 		scope: (input) => [shard.ref("seat", input.seatId)],
 		apply(shards, input) {
-			// shards.seat should be a function (per-resource)
+			// shards.seat should be a function (per-resource) — in scope
 			const seat = shards.seat(input.seatId);
 			seat.visitedLocations.add(input.locationSlug);
 
-			// shards.world should be a direct property (singleton)
-			const _stage: "PLAYING" | "PAUSED" | "FINISHED" = shards.world.gameStage;
+			// @ts-expect-error: world is not in scope (scope only declares "seat")
+			shards.world;
 		},
 	});
 
@@ -433,3 +433,56 @@ channel
 	})
 	// @ts-expect-error: "nope" is not a defined operation
 	.clientImpl("nope", {});
+
+// ── 23. Multi-shard scope — apply receives both shard types ──────────
+
+channel
+	.durable("game")
+	.shard("world", worldState)
+	.shardPerResource("seat", seatState)
+	.operation("transferItem", {
+		execution: "confirmed",
+		versionChecked: true,
+		deduplicate: true,
+		input: v.object({
+			fromSeatId: v.string(),
+			toSeatId: v.string(),
+			itemId: v.string(),
+		}),
+		scope: (input) => [
+			shard.ref("seat", input.fromSeatId),
+			shard.ref("seat", input.toSeatId),
+		],
+	})
+	.serverImpl("transferItem", {
+		apply(shards, input) {
+			// Both "seat" refs are in scope — seat accessor is available
+			const from = shards.seat(input.fromSeatId);
+			const to = shards.seat(input.toSeatId);
+			const idx = from.inventory.findIndex((i) => i.id === input.itemId);
+			const item = from.inventory[idx];
+			if (item) {
+				from.inventory.splice(idx, 1);
+				to.inventory.push(item);
+			}
+		},
+	});
+
+// ── 24. Mixed scope — world + seat both accessible ───────────────────
+
+channel
+	.durable("game")
+	.shard("world", worldState)
+	.shardPerResource("seat", seatState)
+	.operation("mixedScope", {
+		execution: "optimistic",
+		versionChecked: true,
+		deduplicate: true,
+		input: v.object({ seatId: v.string() }),
+		scope: (input) => [shard.ref("world"), shard.ref("seat", input.seatId)],
+		apply(shards, input) {
+			// Both world and seat are in scope
+			const _stage = shards.world.gameStage;
+			const _seat = shards.seat(input.seatId);
+		},
+	});
