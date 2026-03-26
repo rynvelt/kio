@@ -13,8 +13,8 @@ export interface ShardDefinition {
 export interface OperationDefinition {
 	readonly name: string;
 	readonly execution: "optimistic" | "confirmed" | "computed";
-	readonly versionChecked: boolean;
-	readonly deduplicate: boolean;
+	readonly versionChecked?: boolean;
+	readonly deduplicate?: boolean;
 	readonly inputSchema: StandardSchemaV1;
 	readonly errorsSchema: StandardSchemaV1 | undefined;
 	readonly serverResultSchema: StandardSchemaV1 | undefined;
@@ -131,8 +131,8 @@ interface OptimisticOperationConfig<
 	TScopeNames extends string,
 > {
 	readonly execution: "optimistic";
-	readonly versionChecked: boolean;
-	readonly deduplicate: boolean;
+	readonly versionChecked?: boolean;
+	readonly deduplicate?: boolean;
 	readonly input: StandardSchemaV1<TInput>;
 	readonly scope: (
 		input: TInput,
@@ -148,8 +148,8 @@ interface OptimisticOperationConfig<
 
 interface ConfirmedOperationConfig<TInput, TScopeNames extends string> {
 	readonly execution: "confirmed";
-	readonly versionChecked: boolean;
-	readonly deduplicate: boolean;
+	readonly versionChecked?: boolean;
+	readonly deduplicate?: boolean;
 	readonly input: StandardSchemaV1<TInput>;
 	readonly scope: (
 		input: TInput,
@@ -159,8 +159,8 @@ interface ConfirmedOperationConfig<TInput, TScopeNames extends string> {
 
 interface ComputedOperationConfig<TInput, TScopeNames extends string> {
 	readonly execution: "computed";
-	readonly versionChecked: boolean;
-	readonly deduplicate: boolean;
+	readonly versionChecked?: boolean;
+	readonly deduplicate?: boolean;
 	readonly input: StandardSchemaV1<TInput>;
 	readonly scope: (
 		input: TInput,
@@ -404,8 +404,8 @@ function createChannelBuilder<Kind extends ChannelKind, Name extends string>(
 			operations.set(opName, {
 				name: opName,
 				execution: config.execution,
-				versionChecked: config.versionChecked,
-				deduplicate: config.deduplicate,
+				versionChecked: config.versionChecked ?? true,
+				deduplicate: config.deduplicate ?? true,
 				inputSchema: config.input,
 				errorsSchema: config.errors ?? undefined,
 				serverResultSchema: config.serverResult ?? undefined,
@@ -417,6 +417,11 @@ function createChannelBuilder<Kind extends ChannelKind, Name extends string>(
 
 		// biome-ignore lint/suspicious/noExplicitAny: server impl config shape varies by execution type
 		serverImpl(opName: string, config: any) {
+			if (!operations.has(opName)) {
+				throw new Error(
+					`serverImpl: operation "${opName}" is not defined on channel "${name}"`,
+				);
+			}
 			serverImpls.set(opName, {
 				validate: config.validate ?? undefined,
 				compute: config.compute ?? undefined,
@@ -427,6 +432,11 @@ function createChannelBuilder<Kind extends ChannelKind, Name extends string>(
 
 		// biome-ignore lint/suspicious/noExplicitAny: client impl config shape varies
 		clientImpl(opName: string, config: any) {
+			if (!operations.has(opName)) {
+				throw new Error(
+					`clientImpl: operation "${opName}" is not defined on channel "${name}"`,
+				);
+			}
 			clientImpls.set(opName, {
 				canRetry: config.canRetry ?? undefined,
 			});

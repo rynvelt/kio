@@ -1,7 +1,9 @@
-import type { ChannelBuilder, ShardDefs } from "./channel";
+import type { ChannelBuilder, ChannelData, ShardDefs } from "./channel";
 
 /** Engine builder — accumulates channels */
 export interface EngineBuilder<TChannels extends object = object> {
+	readonly "~channels": ReadonlyMap<string, ChannelData>;
+
 	channel<
 		Kind extends "durable" | "ephemeral",
 		Name extends string,
@@ -18,10 +20,15 @@ export interface EngineBuilder<TChannels extends object = object> {
 type EmptyChannels = {};
 
 export function engine(): EngineBuilder<EmptyChannels> {
-	const builder: EngineBuilder<EmptyChannels> = {
-		channel(_ch) {
-			return builder as never;
+	const channels = new Map<string, ChannelData>();
+
+	const builder = {
+		"~channels": channels,
+		channel(ch: { "~data": ChannelData }) {
+			channels.set(ch["~data"].name, ch["~data"]);
+			return builder;
 		},
 	};
-	return builder;
+
+	return builder as never;
 }

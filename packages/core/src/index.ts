@@ -14,7 +14,12 @@ export type {
 export { channel } from "./channel";
 export type { EngineBuilder } from "./engine";
 export { engine } from "./engine";
-export type { CasResult, PersistedShard, StateAdapter } from "./persistence";
+export type {
+	CasMultiResult,
+	CasResult,
+	PersistedShard,
+	StateAdapter,
+} from "./persistence";
 export { MemoryStateAdapter } from "./persistence";
 export type {
 	BlockedCode,

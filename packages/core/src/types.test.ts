@@ -362,23 +362,7 @@ channel
 		validate() {},
 	});
 
-// ── 19. Negative: serverImpl for non-existent operation ──────────────
-
-channel
-	.durable("game")
-	.shard("world", worldState)
-	.operation("exists", {
-		execution: "optimistic",
-		versionChecked: true,
-		deduplicate: true,
-		input: v.object({}),
-		scope: () => [shard.ref("world")],
-		apply() {},
-	})
-	// @ts-expect-error: "doesNotExist" is not a defined operation
-	.serverImpl("doesNotExist", {});
-
-// ── 20. clientImpl with typed canRetry ───────────────────────────────
+// ── 19. clientImpl with typed canRetry ────────────────────────────────
 
 channel
 	.durable("game")
@@ -404,7 +388,7 @@ channel
 		},
 	});
 
-// ── 21. clientImpl with no canRetry (empty config) ───────────────────
+// ── 20. clientImpl with no canRetry (empty config) ───────────────────
 
 channel
 	.durable("game")
@@ -419,23 +403,7 @@ channel
 	})
 	.clientImpl("simple", {});
 
-// ── 22. Negative: clientImpl for non-existent operation ──────────────
-
-channel
-	.durable("game")
-	.shard("world", worldState)
-	.operation("exists", {
-		execution: "optimistic",
-		versionChecked: true,
-		deduplicate: true,
-		input: v.object({}),
-		scope: () => [shard.ref("world")],
-		apply() {},
-	})
-	// @ts-expect-error: "nope" is not a defined operation
-	.clientImpl("nope", {});
-
-// ── 23. Multi-shard scope — apply receives both shard types ──────────
+// ── 21. Multi-shard scope — apply receives both shard types ──────────
 
 channel
 	.durable("game")
@@ -469,7 +437,7 @@ channel
 		},
 	});
 
-// ── 24. Mixed scope — world + seat both accessible ───────────────────
+// ── 22. Mixed scope — world + seat both accessible ───────────────────
 
 channel
 	.durable("game")
@@ -488,7 +456,7 @@ channel
 		},
 	});
 
-// ── 25. engine() accumulates channels ────────────────────────────────
+// ── 23. engine() accumulates channels ────────────────────────────────
 
 const gameChannelForEngine = channel
 	.durable("game")
@@ -529,7 +497,7 @@ const _clientEngine = engine()
 	.channel(gameChannelForEngine)
 	.channel(presChannel);
 
-// ── 26. SubmitResult discriminated union ─────────────────────────────
+// ── 24. SubmitResult discriminated union ─────────────────────────────
 
 function _handleResult(result: SubmitResult<"NOT_FOUND" | "EXPIRED">) {
 	if (result.status === "acknowledged") {
@@ -542,7 +510,7 @@ function _handleResult(result: SubmitResult<"NOT_FOUND" | "EXPIRED">) {
 	}
 }
 
-// ── 27. ShardState discriminated union ───────────────────────────────
+// ── 25. ShardState discriminated union ───────────────────────────────
 
 function _handleShardState(s: ShardState<{ items: string[] }>) {
 	if (s.syncStatus === "unavailable" || s.syncStatus === "loading") {

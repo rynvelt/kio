@@ -72,6 +72,10 @@ describe("MemoryStateAdapter", () => {
 		]);
 
 		expect(result.success).toBe(true);
+		if (result.success) {
+			expect(result.versions.get("seat:1")).toBe(2);
+			expect(result.versions.get("seat:2")).toBe(2);
+		}
 
 		const s1 = await adapter.load("game", "seat:1");
 		expect(s1?.state).toEqual({ items: [] });
@@ -82,7 +86,7 @@ describe("MemoryStateAdapter", () => {
 		expect(s2?.version).toBe(2);
 	});
 
-	test("CAS multi fails atomically when one version mismatches", async () => {
+	test("CAS multi fails atomically and identifies failed shard", async () => {
 		const adapter = new MemoryStateAdapter();
 		await adapter.compareAndSwap("game", "seat:1", 0, { items: ["sword"] });
 		await adapter.compareAndSwap("game", "seat:2", 0, { items: ["shield"] });
@@ -104,6 +108,10 @@ describe("MemoryStateAdapter", () => {
 		]);
 
 		expect(result.success).toBe(false);
+		if (!result.success) {
+			expect(result.failedShardId).toBe("seat:2");
+			expect(result.currentVersion).toBe(1);
+		}
 
 		// Neither shard was modified
 		const s1 = await adapter.load("game", "seat:1");
@@ -113,6 +121,15 @@ describe("MemoryStateAdapter", () => {
 		const s2 = await adapter.load("game", "seat:2");
 		expect(s2?.state).toEqual({ items: ["shield"] });
 		expect(s2?.version).toBe(1);
+	});
+
+	test("CAS multi with empty array succeeds with empty versions", async () => {
+		const adapter = new MemoryStateAdapter();
+		const result = await adapter.compareAndSwapMulti([]);
+		expect(result.success).toBe(true);
+		if (result.success) {
+			expect(result.versions.size).toBe(0);
+		}
 	});
 
 	test("different channels are independent", async () => {

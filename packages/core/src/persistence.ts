@@ -4,11 +4,24 @@ export interface PersistedShard {
 	readonly version: number;
 }
 
-/** Compare-and-swap result */
+/** Compare-and-swap result for single-shard operations */
 export type CasResult =
 	| { readonly success: true; readonly version: number }
 	| {
 			readonly success: false;
+			readonly currentVersion: number;
+			readonly currentState: unknown;
+	  };
+
+/** Compare-and-swap result for multi-shard operations */
+export type CasMultiResult =
+	| {
+			readonly success: true;
+			readonly versions: ReadonlyMap<string, number>;
+	  }
+	| {
+			readonly success: false;
+			readonly failedShardId: string;
 			readonly currentVersion: number;
 			readonly currentState: unknown;
 	  };
@@ -34,7 +47,7 @@ export interface StateAdapter {
 			readonly expectedVersion: number;
 			readonly newState: unknown;
 		}>,
-	): Promise<CasResult>;
+	): Promise<CasMultiResult>;
 }
 
 /** In-memory persistence adapter for testing */
@@ -45,7 +58,7 @@ export class MemoryStateAdapter implements StateAdapter {
 	>();
 
 	private key(channelId: string, shardId: string): string {
-		return `${channelId}:${shardId}`;
+		return `${channelId}\0${shardId}`;
 	}
 
 	async load(
@@ -87,7 +100,11 @@ export class MemoryStateAdapter implements StateAdapter {
 			readonly expectedVersion: number;
 			readonly newState: unknown;
 		}>,
-	): Promise<CasResult> {
+	): Promise<CasMultiResult> {
+		if (operations.length === 0) {
+			return { success: true, versions: new Map() };
+		}
+
 		// Check all versions first
 		for (const op of operations) {
 			const k = this.key(op.channelId, op.shardId);
@@ -97,6 +114,7 @@ export class MemoryStateAdapter implements StateAdapter {
 			if (currentVersion !== op.expectedVersion) {
 				return {
 					success: false,
+					failedShardId: op.shardId,
 					currentVersion,
 					currentState: entry?.state,
 				};
@@ -104,15 +122,15 @@ export class MemoryStateAdapter implements StateAdapter {
 		}
 
 		// All matched — apply all
-		let lastVersion = 0;
+		const versions = new Map<string, number>();
 		for (const op of operations) {
 			const k = this.key(op.channelId, op.shardId);
 			const entry = this.store.get(k);
 			const newVersion = (entry?.version ?? 0) + 1;
 			this.store.set(k, { state: op.newState, version: newVersion });
-			lastVersion = newVersion;
+			versions.set(op.shardId, newVersion);
 		}
 
-		return { success: true, version: lastVersion };
+		return { success: true, versions };
 	}
 }
