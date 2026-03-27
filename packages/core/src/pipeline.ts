@@ -163,11 +163,19 @@ export class OperationPipeline {
 		// 7. Compute (server impl, computed ops only)
 		let serverResult: unknown;
 		if (opDef.execution === "computed" && serverImpl?.compute) {
-			const readAccessors = this.stateManager.buildAccessors(
-				composedRoot,
-				scopeRefs,
-			);
-			serverResult = serverImpl.compute(readAccessors, validatedInput, ctx);
+			try {
+				const readAccessors = this.stateManager.buildAccessors(
+					composedRoot,
+					scopeRefs,
+				);
+				serverResult = serverImpl.compute(readAccessors, validatedInput, ctx);
+			} catch {
+				return {
+					status: "rejected",
+					code: "INTERNAL_ERROR",
+					message: "An unexpected error occurred",
+				};
+			}
 		}
 
 		// 8. Apply — determine which apply function to use
@@ -180,31 +188,63 @@ export class OperationPipeline {
 			};
 		}
 
+		let newRoot: Record<string, unknown>;
+		let patchesByShard: Map<string, import("immer").Patch[]>;
 		const finalServerResult = serverResult;
-		const { newRoot, patchesByShard } = this.stateManager.applyMutation(
-			composedRoot,
-			scopeRefs,
-			(accessors) => {
-				applyFn(accessors, validatedInput, finalServerResult, ctx);
-			},
-		);
+		try {
+			const result = this.stateManager.applyMutation(
+				composedRoot,
+				scopeRefs,
+				(accessors) => {
+					applyFn(accessors, validatedInput, finalServerResult, ctx);
+				},
+			);
+			newRoot = result.newRoot;
+			patchesByShard = result.patchesByShard;
+		} catch {
+			return {
+				status: "rejected",
+				code: "INTERNAL_ERROR",
+				message: "An unexpected error occurred",
+			};
+		}
+
+		// Only persist shards that were actually changed
+		const dirtyShardIds = [...patchesByShard.keys()];
 
 		// 9. Persist (durable channels only)
 		if (this.channelData.kind === "durable") {
-			const persistResult = await this.stateManager.persist(
-				loadedShards,
-				newRoot,
-			);
+			let versions: Map<string, number>;
 
-			if (!persistResult.success) {
-				return {
-					status: "rejected",
-					code: "VERSION_CONFLICT",
-					message: `Version conflict on shard "${persistResult.failedShardId}"`,
-				};
+			if (opDef.versionChecked) {
+				// Filter loadedShards to only dirty ones for CAS
+				const dirtyShards = new Map(
+					[...loadedShards.entries()].filter(([id]) =>
+						dirtyShardIds.includes(id),
+					),
+				);
+				const persistResult = await this.stateManager.persist(
+					dirtyShards,
+					newRoot,
+				);
+
+				if (!persistResult.success) {
+					return {
+						status: "rejected",
+						code: "VERSION_CONFLICT",
+						message: `Version conflict on shard "${persistResult.failedShardId}"`,
+					};
+				}
+				versions = persistResult.versions;
+			} else {
+				// Unconditional write — no version check
+				const result = await this.stateManager.persistUnconditional(
+					dirtyShardIds,
+					newRoot,
+				);
+				versions = result.versions;
 			}
 
-			// 10. Track deduplication after successful persist
 			if (opDef.deduplicate && opId) {
 				this.config.deduplication?.add(opId);
 			}
@@ -212,27 +252,23 @@ export class OperationPipeline {
 			return {
 				status: "acknowledged",
 				operationName,
-				shardVersions: persistResult.versions,
+				shardVersions: versions,
 				patchesByShard,
 			};
 		}
 
 		// Ephemeral channels: update cache directly, no persistence
-		for (const [shardId] of loadedShards) {
+		const ephemeralVersions = new Map<string, number>();
+		for (const shardId of dirtyShardIds) {
 			const newState = newRoot[shardId];
 			const cached = this.stateManager.getCached(shardId);
 			const newVersion = (cached?.version ?? 0) + 1;
 			this.stateManager.setCached(shardId, newState, newVersion);
+			ephemeralVersions.set(shardId, newVersion);
 		}
 
 		if (opDef.deduplicate && opId) {
 			this.config.deduplication?.add(opId);
-		}
-
-		const ephemeralVersions = new Map<string, number>();
-		for (const [shardId] of loadedShards) {
-			const cached = this.stateManager.getCached(shardId);
-			if (cached) ephemeralVersions.set(shardId, cached.version);
 		}
 
 		return {

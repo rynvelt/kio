@@ -204,6 +204,32 @@ export class ShardStateManager {
 		return { success: true, versions: new Map(result.versions) };
 	}
 
+	/**
+	 * Persist unconditionally — no version check. For versionChecked: false operations.
+	 * Always succeeds. Updates cache.
+	 */
+	async persistUnconditional(
+		shardIds: readonly string[],
+		newRoot: Record<string, unknown>,
+	): Promise<{ versions: Map<string, number> }> {
+		const versions = new Map<string, number>();
+
+		for (const shardId of shardIds) {
+			const result = await this.adapter.set(
+				this.channelId,
+				shardId,
+				newRoot[shardId],
+			);
+			this.cache.set(shardId, {
+				state: newRoot[shardId],
+				version: result.version,
+			});
+			versions.set(shardId, result.version);
+		}
+
+		return { versions };
+	}
+
 	/** Get cached shard state (for broadcasting) */
 	getCached(shardId: string): CachedShard | undefined {
 		return this.cache.get(shardId);

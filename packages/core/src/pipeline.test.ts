@@ -333,4 +333,194 @@ describe("OperationPipeline", () => {
 			}
 		});
 	});
+
+	describe("versionChecked: false", () => {
+		test("succeeds even after external modification", async () => {
+			const ch = channel
+				.durable("game")
+				.shard("world", v.object({ status: v.string() }))
+				.operation("setStatus", {
+					execution: "optimistic",
+					versionChecked: false,
+					deduplicate: false,
+					input: v.object({ status: v.string() }),
+					scope: () => [shard.ref("world")],
+					apply(shards, input) {
+						shards.world.status = input.status;
+					},
+				});
+
+			const data = ch["~data"];
+			const adapter = new MemoryStateAdapter();
+			const stateManager = new ShardStateManager(
+				"game",
+				data.shardDefs,
+				adapter,
+			);
+			const actor: Actor = { actorId: "player:alice" };
+
+			await adapter.compareAndSwap("game", "world", 0, {
+				status: "idle",
+			});
+
+			const pipeline = new OperationPipeline(data, stateManager);
+
+			// First write to prime the cache
+			await pipeline.submit({
+				operationName: "setStatus",
+				input: { status: "busy" },
+				actor,
+			});
+
+			// External modification
+			await adapter.set("game", "world", { status: "external" });
+
+			// versionChecked: false should succeed unconditionally
+			const result = await pipeline.submit({
+				operationName: "setStatus",
+				input: { status: "away" },
+				actor,
+			});
+
+			expect(result.status).toBe("acknowledged");
+
+			const persisted = await adapter.load("game", "world");
+			expect((persisted?.state as { status: string }).status).toBe("away");
+		});
+	});
+
+	describe("ephemeral channels", () => {
+		test("applies without persistence", async () => {
+			const ch = channel
+				.ephemeral("presence")
+				.shardPerResource(
+					"player",
+					v.object({
+						gps: v.object({ lat: v.number(), lng: v.number() }),
+					}),
+				)
+				.operation("updateGps", {
+					execution: "optimistic",
+					versionChecked: false,
+					deduplicate: false,
+					input: v.object({
+						playerId: v.string(),
+						lat: v.number(),
+						lng: v.number(),
+					}),
+					scope: (input) => [shard.ref("player", input.playerId)],
+					apply(shards, input) {
+						const p = shards.player(input.playerId);
+						(p as { gps: { lat: number; lng: number } }).gps = {
+							lat: input.lat,
+							lng: input.lng,
+						};
+					},
+				});
+
+			const data = ch["~data"];
+			const adapter = new MemoryStateAdapter();
+			const stateManager = new ShardStateManager(
+				"presence",
+				data.shardDefs,
+				adapter,
+			);
+			const actor: Actor = { actorId: "player:alice" };
+
+			// Seed initial state in cache (ephemeral — no persistence)
+			stateManager.setCached("player:alice", { gps: { lat: 0, lng: 0 } }, 0);
+
+			const pipeline = new OperationPipeline(data, stateManager);
+			const result = await pipeline.submit({
+				operationName: "updateGps",
+				input: { playerId: "alice", lat: 48.8, lng: 2.3 },
+				actor,
+			});
+
+			expect(result.status).toBe("acknowledged");
+
+			// State updated in cache
+			const cached = stateManager.getCached("player:alice");
+			expect((cached?.state as { gps: { lat: number } }).gps.lat).toBe(48.8);
+
+			// Nothing written to persistence adapter
+			const persisted = await adapter.load("presence", "player:alice");
+			expect(persisted).toBeUndefined();
+		});
+	});
+
+	describe("error boundaries", () => {
+		test("apply throwing returns INTERNAL_ERROR", async () => {
+			const ch = channel
+				.durable("game")
+				.shard("world", v.object({ turn: v.number() }))
+				.operation("crashingOp", {
+					execution: "optimistic",
+					input: v.object({}),
+					scope: () => [shard.ref("world")],
+					apply() {
+						throw new Error("consumer bug");
+					},
+				});
+
+			const data = ch["~data"];
+			const adapter = new MemoryStateAdapter();
+			const stateManager = new ShardStateManager(
+				"game",
+				data.shardDefs,
+				adapter,
+			);
+			await adapter.compareAndSwap("game", "world", 0, { turn: 0 });
+
+			const pipeline = new OperationPipeline(data, stateManager);
+			const result = await pipeline.submit({
+				operationName: "crashingOp",
+				input: {},
+				actor: { actorId: "alice" },
+			});
+
+			expect(result.status).toBe("rejected");
+			if (result.status === "rejected") {
+				expect(result.code).toBe("INTERNAL_ERROR");
+			}
+		});
+
+		test("compute throwing returns INTERNAL_ERROR", async () => {
+			const ch = channel
+				.durable("game")
+				.shard("world", v.object({ turn: v.number() }))
+				.operation("crashingCompute", {
+					execution: "computed",
+					input: v.object({}),
+					scope: () => [shard.ref("world")],
+				})
+				.serverImpl("crashingCompute", {
+					compute() {
+						throw new Error("compute bug");
+					},
+					apply() {},
+				});
+
+			const data = ch["~data"];
+			const adapter = new MemoryStateAdapter();
+			const stateManager = new ShardStateManager(
+				"game",
+				data.shardDefs,
+				adapter,
+			);
+			await adapter.compareAndSwap("game", "world", 0, { turn: 0 });
+
+			const pipeline = new OperationPipeline(data, stateManager);
+			const result = await pipeline.submit({
+				operationName: "crashingCompute",
+				input: {},
+				actor: { actorId: "alice" },
+			});
+
+			expect(result.status).toBe("rejected");
+			if (result.status === "rejected") {
+				expect(result.code).toBe("INTERNAL_ERROR");
+			}
+		});
+	});
 });

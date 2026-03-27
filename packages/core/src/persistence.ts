@@ -31,6 +31,13 @@ export interface StateAdapter {
 	/** Load shard state. Returns undefined if shard doesn't exist. */
 	load(channelId: string, shardId: string): Promise<PersistedShard | undefined>;
 
+	/** Unconditional write — ignores version, always succeeds. For versionChecked: false operations. */
+	set(
+		channelId: string,
+		shardId: string,
+		newState: unknown,
+	): Promise<{ version: number }>;
+
 	/** Atomically update shard state if version matches. */
 	compareAndSwap(
 		channelId: string,
@@ -59,6 +66,18 @@ export class MemoryStateAdapter implements StateAdapter {
 
 	private key(channelId: string, shardId: string): string {
 		return `${channelId}\0${shardId}`;
+	}
+
+	async set(
+		channelId: string,
+		shardId: string,
+		newState: unknown,
+	): Promise<{ version: number }> {
+		const k = this.key(channelId, shardId);
+		const entry = this.store.get(k);
+		const newVersion = (entry?.version ?? 0) + 1;
+		this.store.set(k, { state: newState, version: newVersion });
+		return { version: newVersion };
 	}
 
 	async load(
