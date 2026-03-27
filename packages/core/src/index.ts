@@ -21,6 +21,8 @@ export type {
 	StateAdapter,
 } from "./persistence";
 export { MemoryStateAdapter } from "./persistence";
+export type { Actor } from "./pipeline";
+export { KIO_SERVER_ACTOR } from "./pipeline";
 export type {
 	BlockedCode,
 	EngineErrorCode,
@@ -28,6 +30,8 @@ export type {
 	SubmitResult,
 } from "./result";
 export type { InferSchema } from "./schema";
+export type { Server, ServerConfig } from "./server";
+export { createServer } from "./server";
 export type { ShardRef } from "./shard";
 export { shard } from "./shard";
 export type { PendingOperation, ShardState } from "./state";
