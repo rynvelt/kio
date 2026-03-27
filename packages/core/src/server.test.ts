@@ -187,6 +187,45 @@ describe("createServer", () => {
 		server.broadcastDirtyShards("presence");
 		expect(presSub.messages).toHaveLength(1);
 	});
-});
 
-// Type-level tests for Server are in types.test.ts (runs under tsgo only, not bun test)
+	describe("type + runtime safety", () => {
+		test("rejects invalid channel name", async () => {
+			const server = createServer(setupServerEngine(), {
+				persistence: new MemoryStateAdapter(),
+			});
+
+			// @ts-expect-error: "nonexistent" is not a valid channel
+			const promise = server.submit("nonexistent", "advanceTurn", {});
+			await expect(promise).rejects.toThrow(
+				'Channel "nonexistent" is not registered',
+			);
+		});
+
+		test("rejects invalid operation name", async () => {
+			const adapter = new MemoryStateAdapter();
+			await adapter.compareAndSwap("game", "world", 0, {
+				stage: "PLAYING",
+				turn: 0,
+			});
+
+			const server = createServer(setupServerEngine(), {
+				persistence: adapter,
+			});
+
+			// @ts-expect-error: "nonexistent" is not a valid operation on "game"
+			const result = await server.submit("game", "nonexistent", {});
+			expect(result.status).toBe("rejected");
+		});
+
+		test("rejects invalid channel for broadcastDirtyShards", () => {
+			const server = createServer(setupServerEngine(), {
+				persistence: new MemoryStateAdapter(),
+			});
+
+			expect(() => {
+				// @ts-expect-error: "nonexistent" is not a valid channel
+				server.broadcastDirtyShards("nonexistent");
+			}).toThrow('Channel "nonexistent" is not registered');
+		});
+	});
+});

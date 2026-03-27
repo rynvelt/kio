@@ -569,26 +569,3 @@ _serverForTypes.submit("presence", "setOnline", { playerId: 123 });
 
 // @ts-expect-error: missing required field for setOnline
 _serverForTypes.submit("presence", "setOnline", {});
-
-import { expect, test } from "bun:test";
-
-test("server rejects invalid channel name at type and runtime level", async () => {
-	// @ts-expect-error: "nonexistent" is not a valid channel
-	const promise = _serverForTypes.submit("nonexistent", "advanceTurn", {});
-	await expect(promise).rejects.toThrow(
-		'Channel "nonexistent" is not registered',
-	);
-});
-
-test("server rejects invalid operation name at type and runtime level", async () => {
-	// @ts-expect-error: "nonexistent" is not a valid operation on "game"
-	const result = await _serverForTypes.submit("game", "nonexistent", {});
-	expect(result.status).toBe("rejected");
-});
-
-test("server rejects invalid channel for broadcastDirtyShards at type and runtime level", () => {
-	expect(() => {
-		// @ts-expect-error: "nonexistent" is not a valid channel
-		_serverForTypes.broadcastDirtyShards("nonexistent");
-	}).toThrow('Channel "nonexistent" is not registered');
-});
