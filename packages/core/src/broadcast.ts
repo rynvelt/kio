@@ -51,7 +51,6 @@ export class BroadcastManager {
 	constructor(
 		private readonly channelId: string,
 		private readonly kind: "durable" | "ephemeral",
-		private readonly autoBroadcast: boolean,
 	) {}
 
 	addSubscriber(subscriber: Subscriber, shardIds: readonly string[]): void {
@@ -81,26 +80,31 @@ export class BroadcastManager {
 	}
 
 	/**
-	 * Called by the pipeline after a successful operation.
-	 * If autoBroadcast: sends patches immediately.
-	 * If not: marks shards dirty for later flush.
+	 * Called after a successful operation on autoBroadcast: true channels.
+	 * Sends patches immediately to affected subscribers.
 	 */
-	onOperationApplied(
+	broadcastPatches(
 		patchesByShard: ReadonlyMap<string, readonly Patch[]>,
 		shardVersions: ReadonlyMap<string, number>,
 		causedBy: CausedBy,
 	): void {
-		const changedShardIds = [...patchesByShard.keys()];
+		this.sendPatches(
+			[...patchesByShard.keys()],
+			patchesByShard,
+			shardVersions,
+			causedBy,
+		);
+	}
 
-		if (this.autoBroadcast) {
-			this.sendPatches(
-				changedShardIds,
-				patchesByShard,
-				shardVersions,
-				causedBy,
-			);
-		} else {
-			this.markDirty(changedShardIds);
+	/**
+	 * Called by the state manager's onChange callback.
+	 * Marks the shard as dirty for each subscriber that cares about it.
+	 */
+	onShardChanged(shardId: string): void {
+		for (const [subscriberId, subscribedShards] of this.subscriberShards) {
+			if (!subscribedShards.has(shardId)) continue;
+			const dirtySet = this.dirtySets.get(subscriberId);
+			dirtySet?.add(shardId);
 		}
 	}
 
@@ -181,19 +185,6 @@ export class BroadcastManager {
 					kind: this.kind,
 					shards: entries,
 				});
-			}
-		}
-	}
-
-	private markDirty(shardIds: readonly string[]): void {
-		for (const [subscriberId, subscribedShards] of this.subscriberShards) {
-			const dirtySet = this.dirtySets.get(subscriberId);
-			if (!dirtySet) continue;
-
-			for (const shardId of shardIds) {
-				if (subscribedShards.has(shardId)) {
-					dirtySet.add(shardId);
-				}
 			}
 		}
 	}

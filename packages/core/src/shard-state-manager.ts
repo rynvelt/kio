@@ -25,15 +25,28 @@ export interface ApplyResult {
 	readonly patches: ReadonlyMap<string, readonly Patch[]>;
 }
 
+/** Callback fired when a shard's cached state changes */
+export type ShardChangeListener = (shardId: string) => void;
+
 /** Manages shard state: loading, caching, applying via Immer, writing back */
 export class ShardStateManager {
 	private readonly cache = new Map<string, CachedShard>();
+	private changeListener: ShardChangeListener | undefined;
 
 	constructor(
 		private readonly channelId: string,
 		private readonly shardDefs: ReadonlyMap<string, ShardDefinition>,
 		private readonly adapter: StateAdapter,
 	) {}
+
+	/** Register a listener called whenever a shard's cached state changes */
+	onChange(listener: ShardChangeListener): void {
+		this.changeListener = listener;
+	}
+
+	private notifyChange(shardId: string): void {
+		this.changeListener?.(shardId);
+	}
 
 	/** Load shard states for the given refs. Uses cache, falls back to persistence. */
 	async loadShards(
@@ -175,6 +188,7 @@ export class ShardStateManager {
 				state: newRoot[shardId],
 				version: result.version,
 			});
+			this.notifyChange(shardId);
 			return { success: true, versions: new Map([[shardId, result.version]]) };
 		}
 
@@ -198,6 +212,7 @@ export class ShardStateManager {
 					state: newRoot[shardId],
 					version: newVersion,
 				});
+				this.notifyChange(shardId);
 			}
 		}
 
@@ -224,6 +239,7 @@ export class ShardStateManager {
 				state: newRoot[shardId],
 				version: result.version,
 			});
+			this.notifyChange(shardId);
 			versions.set(shardId, result.version);
 		}
 
@@ -238,5 +254,6 @@ export class ShardStateManager {
 	/** Update cache directly (for ephemeral channels that skip persistence) */
 	setCached(shardId: string, state: unknown, version: number): void {
 		this.cache.set(shardId, { state, version });
+		this.notifyChange(shardId);
 	}
 }
