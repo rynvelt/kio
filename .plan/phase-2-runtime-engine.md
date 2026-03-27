@@ -1,5 +1,7 @@
 # Phase 2: Runtime Server Engine
 
+## Status: Steps 1-4 complete, step 5 deferred
+
 ## Goal
 
 Make the operation pipeline actually run: submit → validate → compute → apply → persist → broadcast.
@@ -12,61 +14,33 @@ Tested with in-memory transport and in-memory persistence.
 
 ## Steps
 
-### 1. In-memory persistence adapter
+### 1. In-memory persistence adapter ✅
 
-Implements `StateAdapter` interface: `load`, `compareAndSwap`, `compareAndSwapMulti`.
+Implements `StateAdapter` interface: `load`, `set`, `compareAndSwap`, `compareAndSwapMulti`.
 Backed by a `Map<string, { state: unknown; version: number }>`.
 
-**Test:** adapter conformance — CAS succeeds/fails on version match/mismatch, multi is atomic.
+### 2. Server-side shard state manager ✅
 
-### 2. Server-side shard state manager
+Loads from persistence, caches, builds composed root, applies via Immer `produceWithPatches`,
+decomposes patches per shard, persists via CAS or unconditional set.
 
-Holds in-memory shard state per channel. Responsibilities:
-- Load shard state (from persistence adapter on first access, then cached)
-- Build composed root object for a set of shard refs (for `apply`)
-- Run `apply` via Immer `produceWithPatches`, decompose patches per shard
-- Update cached state + version after successful CAS
-- Track dirty shards per subscriber (for `autoBroadcast: false`)
+### 3. Operation pipeline ✅
 
-**Test:** load, apply produces correct new state + patches, version increments.
+Dedup → input validation → authorize → scope → load → validate → compute → apply → persist.
+Handles durable (CAS) and ephemeral (cache-only). versionChecked: false uses unconditional set.
+Error boundaries catch apply/compute exceptions → INTERNAL_ERROR.
 
-### 3. Operation pipeline
+### 4. Broadcast manager ✅
 
-The core path. Receives a submission (operation name, input, shard versions) and runs:
-1. Input validation (StandardSchema `~standard.validate()`)
-2. Authorization check (`authorize` hook)
-3. Load scoped shards
-4. Run `validate()` (server impl) — may reject via `reject()`
-5. Run `compute()` (server impl, computed ops only)
-6. Run `apply()` via Immer on composed root
-7. Persist via `compareAndSwap` / `compareAndSwapMulti`
-8. On CAS failure: reject with VERSION_CONFLICT + fresh state
-9. On success: update cache, return acknowledgement + patches
+`onOperationApplied()` — auto channels send patches, manual channels mark dirty.
+`broadcastDirtyShards()` — flush full state to subscribers.
 
-**Test:** full pipeline for each execution mode (optimistic, confirmed, computed).
-Version conflict rejection. Validation rejection with typed errors. Deduplication.
+### 5. Server-as-actor — deferred to phase 3
 
-### 4. Broadcast
+## Open items from review (phase 3)
 
-After successful apply:
-- `autoBroadcast: true`: immediately send patches (or full state) to subscribers
-- `autoBroadcast: false`: mark shards dirty, wait for `broadcastDirtyShards()`
-
-Uses the direct-call transport (no network). Broadcast message uses the array-based format with channelId + kind.
-
-**Test:** subscribers receive correct patches after operation. Dirty tracking + manual flush.
-
-### 5. Server-as-actor
-
-The server can submit operations through the same pipeline. Uses `KIO_SERVER_ACTOR` as actor.
-`maxRetries` config for automatic retry on version conflicts.
-
-**Test:** server submits operation, pipeline runs, state changes. Retry on conflict.
-
-## Not in this phase
-
-- Client-side ShardStore / reconciliation
-- Transport adapters (socket.io, websocket)
-- Persistence adapters (Prisma)
-- Connection lifecycle (authenticate, subscriptions)
-- Subscription shard
+- **ChannelEngine** — higher-level orchestrator composing pipeline + broadcast + state manager
+- **VERSION_CONFLICT fresh state** — rejection should include current shard state for canRetry
+- **Server-as-actor retry** — submit with maxRetries config
+- **Ephemeral versioning** — entries should not carry version numbers per vision doc
+- **broadcastMode: "full"** — declared but unused; should send full state when configured
