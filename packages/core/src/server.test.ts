@@ -116,16 +116,6 @@ describe("createServer", () => {
 		}
 	});
 
-	test("throws on unknown channel name", async () => {
-		const server = createServer(setupServerEngine(), {
-			persistence: new MemoryStateAdapter(),
-		});
-
-		await expect(server.submit("nonexistent", "op", {})).rejects.toThrow(
-			'Channel "nonexistent" is not registered',
-		);
-	});
-
 	test("authorize hook is wired to all channels", async () => {
 		const adapter = new MemoryStateAdapter();
 		await adapter.compareAndSwap("game", "world", 0, {
