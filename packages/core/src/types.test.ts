@@ -6,6 +6,8 @@
 import * as v from "valibot";
 import type { ShardState, SubmitResult } from "./index";
 import { channel, engine, shard } from "./index";
+import { MemoryStateAdapter } from "./persistence";
+import { createServer } from "./server";
 
 // ── Type assertion helpers ───────────────────────────────────────────
 
@@ -521,3 +523,72 @@ function _handleShardState(s: ShardState<{ items: string[] }>) {
 		const _items: string[] = s.state.items;
 	}
 }
+
+// ── 26. Server type safety ───────────────────────────────────────────
+
+const _serverForTypes = createServer(
+	engine()
+		.channel(
+			channel
+				.durable("game")
+				.shard("world", v.object({ turn: v.number() }))
+				.operation("advanceTurn", {
+					execution: "optimistic",
+					input: v.object({}),
+					scope: () => [shard.ref("world")],
+					apply(shards) {
+						shards.world.turn += 1;
+					},
+				}),
+		)
+		.channel(
+			channel
+				.ephemeral("presence")
+				.shardPerResource("player", v.object({ online: v.boolean() }))
+				.operation("setOnline", {
+					execution: "optimistic",
+					versionChecked: false,
+					deduplicate: false,
+					input: v.object({ playerId: v.string() }),
+					scope: (input) => [shard.ref("player", input.playerId)],
+					apply(shards, input) {
+						(shards.player(input.playerId) as { online: boolean }).online =
+							true;
+					},
+				}),
+		),
+	{ persistence: new MemoryStateAdapter() },
+);
+
+// Valid calls
+_serverForTypes.submit("game", "advanceTurn", {});
+_serverForTypes.submit("presence", "setOnline", { playerId: "alice" });
+
+// @ts-expect-error: wrong input type (playerId should be string, not number)
+_serverForTypes.submit("presence", "setOnline", { playerId: 123 });
+
+// @ts-expect-error: missing required field for setOnline
+_serverForTypes.submit("presence", "setOnline", {});
+
+import { expect, test } from "bun:test";
+
+test("server rejects invalid channel name at type and runtime level", async () => {
+	// @ts-expect-error: "nonexistent" is not a valid channel
+	const promise = _serverForTypes.submit("nonexistent", "advanceTurn", {});
+	await expect(promise).rejects.toThrow(
+		'Channel "nonexistent" is not registered',
+	);
+});
+
+test("server rejects invalid operation name at type and runtime level", async () => {
+	// @ts-expect-error: "nonexistent" is not a valid operation on "game"
+	const result = await _serverForTypes.submit("game", "nonexistent", {});
+	expect(result.status).toBe("rejected");
+});
+
+test("server rejects invalid channel for broadcastDirtyShards at type and runtime level", () => {
+	expect(() => {
+		// @ts-expect-error: "nonexistent" is not a valid channel
+		_serverForTypes.broadcastDirtyShards("nonexistent");
+	}).toThrow('Channel "nonexistent" is not registered');
+});

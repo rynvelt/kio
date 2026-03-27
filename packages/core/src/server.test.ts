@@ -188,3 +188,5 @@ describe("createServer", () => {
 		expect(presSub.messages).toHaveLength(1);
 	});
 });
+
+// Type-level tests for Server are in types.test.ts (runs under tsgo only, not bun test)
