@@ -38,9 +38,10 @@ export interface Subscriber {
 /**
  * Manages subscribers and broadcasting.
  *
- * Two broadcast modes, never mixed on the same channel:
- * - autoBroadcast: true → patches sent immediately after each operation
- * - autoBroadcast: false → shards marked dirty, full state sent on manual flush
+ * The pipeline calls onOperationApplied() after every successful operation.
+ * The broadcast manager decides what to do based on autoBroadcast:
+ * - true → sends patches immediately to affected subscribers
+ * - false → marks shards dirty; consumer calls broadcastDirtyShards() to flush
  */
 export class BroadcastManager {
 	private readonly subscribers = new Map<string, Subscriber>();
@@ -50,6 +51,7 @@ export class BroadcastManager {
 	constructor(
 		private readonly channelId: string,
 		private readonly kind: "durable" | "ephemeral",
+		private readonly autoBroadcast: boolean,
 	) {}
 
 	addSubscriber(subscriber: Subscriber, shardIds: readonly string[]): void {
@@ -79,62 +81,33 @@ export class BroadcastManager {
 	}
 
 	/**
-	 * Called after a successful operation (autoBroadcast: true channels).
-	 * Sends patches immediately to subscribers of the affected shards.
+	 * Called by the pipeline after a successful operation.
+	 * If autoBroadcast: sends patches immediately.
+	 * If not: marks shards dirty for later flush.
 	 */
-	broadcastPatches(
+	onOperationApplied(
 		patchesByShard: ReadonlyMap<string, readonly Patch[]>,
 		shardVersions: ReadonlyMap<string, number>,
 		causedBy: CausedBy,
 	): void {
 		const changedShardIds = [...patchesByShard.keys()];
 
-		for (const [subscriberId, subscribedShards] of this.subscriberShards) {
-			const subscriber = this.subscribers.get(subscriberId);
-			if (!subscriber) continue;
-
-			const entries: BroadcastShardEntry[] = [];
-			for (const shardId of changedShardIds) {
-				if (!subscribedShards.has(shardId)) continue;
-
-				const version = shardVersions.get(shardId) ?? 0;
-				const patches = patchesByShard.get(shardId);
-				if (patches && patches.length > 0) {
-					entries.push({ shardId, version, patches, causedBy });
-				}
-			}
-
-			if (entries.length > 0) {
-				subscriber.send({
-					type: "broadcast",
-					channelId: this.channelId,
-					kind: this.kind,
-					shards: entries,
-				});
-			}
-		}
-	}
-
-	/**
-	 * Called after a successful operation (autoBroadcast: false channels).
-	 * Marks affected shards as dirty for each subscriber.
-	 */
-	markDirty(shardIds: readonly string[]): void {
-		for (const [subscriberId, subscribedShards] of this.subscriberShards) {
-			const dirtySet = this.dirtySets.get(subscriberId);
-			if (!dirtySet) continue;
-
-			for (const shardId of shardIds) {
-				if (subscribedShards.has(shardId)) {
-					dirtySet.add(shardId);
-				}
-			}
+		if (this.autoBroadcast) {
+			this.sendPatches(
+				changedShardIds,
+				patchesByShard,
+				shardVersions,
+				causedBy,
+			);
+		} else {
+			this.markDirty(changedShardIds);
 		}
 	}
 
 	/**
 	 * Flush dirty shards — send full state to subscribers.
 	 * If shardIds provided, flush only those. Otherwise flush all dirty.
+	 * Only relevant for autoBroadcast: false channels.
 	 */
 	broadcastDirtyShards(
 		getShardState: (
@@ -174,9 +147,53 @@ export class BroadcastManager {
 				});
 			}
 
-			// Clear dirty after successful send
 			for (const shardId of shardsToFlush) {
 				dirtySet.delete(shardId);
+			}
+		}
+	}
+
+	private sendPatches(
+		changedShardIds: readonly string[],
+		patchesByShard: ReadonlyMap<string, readonly Patch[]>,
+		shardVersions: ReadonlyMap<string, number>,
+		causedBy: CausedBy,
+	): void {
+		for (const [subscriberId, subscribedShards] of this.subscriberShards) {
+			const subscriber = this.subscribers.get(subscriberId);
+			if (!subscriber) continue;
+
+			const entries: BroadcastShardEntry[] = [];
+			for (const shardId of changedShardIds) {
+				if (!subscribedShards.has(shardId)) continue;
+
+				const version = shardVersions.get(shardId) ?? 0;
+				const patches = patchesByShard.get(shardId);
+				if (patches && patches.length > 0) {
+					entries.push({ shardId, version, patches, causedBy });
+				}
+			}
+
+			if (entries.length > 0) {
+				subscriber.send({
+					type: "broadcast",
+					channelId: this.channelId,
+					kind: this.kind,
+					shards: entries,
+				});
+			}
+		}
+	}
+
+	private markDirty(shardIds: readonly string[]): void {
+		for (const [subscriberId, subscribedShards] of this.subscriberShards) {
+			const dirtySet = this.dirtySets.get(subscriberId);
+			if (!dirtySet) continue;
+
+			for (const shardId of shardIds) {
+				if (subscribedShards.has(shardId)) {
+					dirtySet.add(shardId);
+				}
 			}
 		}
 	}

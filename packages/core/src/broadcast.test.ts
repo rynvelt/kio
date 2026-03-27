@@ -20,18 +20,23 @@ function createSubscriber(
 }
 
 const testPatches: Patch[] = [{ op: "replace", path: ["turn"], value: 1 }];
+const testCausedBy = { operation: "advanceTurn", actor: "player:alice" };
+
+function callApplied(mgr: BroadcastManager, shardId = "world", version = 2) {
+	mgr.onOperationApplied(
+		new Map([[shardId, testPatches]]),
+		new Map([[shardId, version]]),
+		testCausedBy,
+	);
+}
 
 describe("BroadcastManager — autoBroadcast: true", () => {
-	test("sends patches to subscribed subscriber", () => {
-		const mgr = new BroadcastManager("game", "durable");
+	test("sends patches immediately on operation applied", () => {
+		const mgr = new BroadcastManager("game", "durable", true);
 		const sub = createSubscriber("alice");
 		mgr.addSubscriber(sub, ["world"]);
 
-		mgr.broadcastPatches(
-			new Map([["world", testPatches]]),
-			new Map([["world", 2]]),
-			{ operation: "advanceTurn", actor: "alice" },
-		);
+		callApplied(mgr);
 
 		expect(sub.messages).toHaveLength(1);
 		expect(sub.messages[0]?.shards).toHaveLength(1);
@@ -42,83 +47,68 @@ describe("BroadcastManager — autoBroadcast: true", () => {
 	});
 
 	test("does not send to unsubscribed shards", () => {
-		const mgr = new BroadcastManager("game", "durable");
+		const mgr = new BroadcastManager("game", "durable", true);
 		const sub = createSubscriber("alice");
 		mgr.addSubscriber(sub, ["seat:1"]);
 
-		mgr.broadcastPatches(
-			new Map([["world", testPatches]]),
-			new Map([["world", 2]]),
-			{ operation: "advanceTurn", actor: "alice" },
-		);
+		callApplied(mgr);
 
 		expect(sub.messages).toHaveLength(0);
 	});
 
 	test("sends to multiple subscribers", () => {
-		const mgr = new BroadcastManager("game", "durable");
+		const mgr = new BroadcastManager("game", "durable", true);
 		const alice = createSubscriber("alice");
 		const bob = createSubscriber("bob");
 		mgr.addSubscriber(alice, ["world"]);
 		mgr.addSubscriber(bob, ["world"]);
 
-		mgr.broadcastPatches(
-			new Map([["world", testPatches]]),
-			new Map([["world", 2]]),
-			{ operation: "advanceTurn", actor: "alice" },
-		);
+		callApplied(mgr);
 
 		expect(alice.messages).toHaveLength(1);
 		expect(bob.messages).toHaveLength(1);
 	});
 
 	test("includes causedBy metadata", () => {
-		const mgr = new BroadcastManager("game", "durable");
+		const mgr = new BroadcastManager("game", "durable", true);
 		const sub = createSubscriber("alice");
 		mgr.addSubscriber(sub, ["world"]);
 
-		mgr.broadcastPatches(
-			new Map([["world", testPatches]]),
-			new Map([["world", 2]]),
-			{ operation: "advanceTurn", actor: "player:bob" },
-		);
+		callApplied(mgr);
 
 		const entry = sub.messages[0]?.shards[0];
 		expect(entry?.causedBy?.operation).toBe("advanceTurn");
-		expect(entry?.causedBy?.actor).toBe("player:bob");
+		expect(entry?.causedBy?.actor).toBe("player:alice");
 	});
 
 	test("removed subscriber receives nothing", () => {
-		const mgr = new BroadcastManager("game", "durable");
+		const mgr = new BroadcastManager("game", "durable", true);
 		const sub = createSubscriber("alice");
 		mgr.addSubscriber(sub, ["world"]);
 		mgr.removeSubscriber("alice");
 
-		mgr.broadcastPatches(
-			new Map([["world", testPatches]]),
-			new Map([["world", 2]]),
-			{ operation: "advanceTurn", actor: "alice" },
-		);
+		callApplied(mgr);
 
 		expect(sub.messages).toHaveLength(0);
 	});
 });
 
 describe("BroadcastManager — autoBroadcast: false", () => {
-	test("markDirty + flush sends full state", () => {
-		const mgr = new BroadcastManager("presence", "ephemeral");
+	test("operation applied marks dirty, flush sends full state", () => {
+		const mgr = new BroadcastManager("presence", "ephemeral", false);
 		const sub = createSubscriber("alice");
 		mgr.addSubscriber(sub, ["player:bob"]);
 
-		mgr.markDirty(["player:bob"]);
+		callApplied(mgr, "player:bob", 3);
 
-		const getState = (id: string) => {
+		// Nothing sent yet
+		expect(sub.messages).toHaveLength(0);
+
+		mgr.broadcastDirtyShards((id) => {
 			if (id === "player:bob")
 				return { state: { gps: { lat: 1, lng: 2 } }, version: 3 };
 			return undefined;
-		};
-
-		mgr.broadcastDirtyShards(getState);
+		});
 
 		expect(sub.messages).toHaveLength(1);
 		const entry = sub.messages[0]?.shards[0];
@@ -130,11 +120,11 @@ describe("BroadcastManager — autoBroadcast: false", () => {
 	});
 
 	test("flush clears dirty set — second flush sends nothing", () => {
-		const mgr = new BroadcastManager("presence", "ephemeral");
+		const mgr = new BroadcastManager("presence", "ephemeral", false);
 		const sub = createSubscriber("alice");
 		mgr.addSubscriber(sub, ["player:bob"]);
 
-		mgr.markDirty(["player:bob"]);
+		callApplied(mgr, "player:bob");
 
 		const getState = () => ({ state: { gps: null }, version: 1 });
 
@@ -145,17 +135,19 @@ describe("BroadcastManager — autoBroadcast: false", () => {
 		expect(sub.messages).toHaveLength(1);
 	});
 
-	test("multiple dirty marks coalesce into one flush", () => {
-		const mgr = new BroadcastManager("presence", "ephemeral");
+	test("multiple operations coalesce into one flush", () => {
+		const mgr = new BroadcastManager("presence", "ephemeral", false);
 		const sub = createSubscriber("alice");
 		mgr.addSubscriber(sub, ["player:bob"]);
 
-		mgr.markDirty(["player:bob"]);
-		mgr.markDirty(["player:bob"]);
-		mgr.markDirty(["player:bob"]);
+		callApplied(mgr, "player:bob", 1);
+		callApplied(mgr, "player:bob", 2);
+		callApplied(mgr, "player:bob", 3);
 
-		const getState = () => ({ state: { gps: { lat: 9, lng: 9 } }, version: 5 });
-		mgr.broadcastDirtyShards(getState);
+		mgr.broadcastDirtyShards(() => ({
+			state: { gps: { lat: 9, lng: 9 } },
+			version: 5,
+		}));
 
 		expect(sub.messages).toHaveLength(1);
 		const entry = sub.messages[0]?.shards[0];
@@ -166,11 +158,12 @@ describe("BroadcastManager — autoBroadcast: false", () => {
 	});
 
 	test("selective flush by shard ID", () => {
-		const mgr = new BroadcastManager("presence", "ephemeral");
+		const mgr = new BroadcastManager("presence", "ephemeral", false);
 		const sub = createSubscriber("alice");
 		mgr.addSubscriber(sub, ["player:bob", "player:carol"]);
 
-		mgr.markDirty(["player:bob", "player:carol"]);
+		callApplied(mgr, "player:bob");
+		callApplied(mgr, "player:carol");
 
 		const getState = (id: string) => ({ state: { who: id }, version: 1 });
 
@@ -187,11 +180,11 @@ describe("BroadcastManager — autoBroadcast: false", () => {
 	});
 
 	test("only marks dirty for subscribed shards", () => {
-		const mgr = new BroadcastManager("presence", "ephemeral");
+		const mgr = new BroadcastManager("presence", "ephemeral", false);
 		const sub = createSubscriber("alice");
 		mgr.addSubscriber(sub, ["player:bob"]);
 
-		mgr.markDirty(["player:carol"]);
+		callApplied(mgr, "player:carol");
 
 		const getState = () => ({ state: {}, version: 1 });
 		mgr.broadcastDirtyShards(getState);
