@@ -12,9 +12,11 @@ type Listener = () => void;
  * - latest: has current state from server
  */
 export class ShardStore<T> {
+	/** Server-confirmed state. Does not change during optimistic predictions — the snapshot may show predicted state while this holds the last confirmed truth. */
 	private authoritative: { state: T; version: number } | null = null;
 	private status: "unavailable" | "loading" | "latest" = "unavailable";
 	private listeners = new Set<Listener>();
+	/** Derived consumer-facing snapshot (syncStatus + state + pending). Computed lazily from authoritative + status + pending. Set to null on invalidation. */
 	private cachedSnapshot: ShardState<T> | null = null;
 
 	/** Transition to "loading" — access granted but no state yet */
