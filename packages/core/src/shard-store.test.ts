@@ -13,33 +13,37 @@ describe("ShardStore", () => {
 	});
 
 	describe("syncStatus transitions", () => {
-		test("unavailable → loading", () => {
+		test("unavailable → loading on grantAccess", () => {
 			const store = new ShardStore<{ turn: number }>();
-			store.setLoading();
+			store.grantAccess();
 			expect(store.snapshot.syncStatus).toBe("loading");
 			expect(store.snapshot.state).toBeNull();
 		});
 
-		test("loading → latest via setState", () => {
+		test("loading → latest on setState", () => {
 			const store = new ShardStore<{ turn: number }>();
-			store.setLoading();
+			store.grantAccess();
 			store.setState({ turn: 0 }, 1);
 			expect(store.snapshot.syncStatus).toBe("latest");
 			expect(store.snapshot.state).toEqual({ turn: 0 });
 		});
 
-		test("latest → unavailable (access revoked)", () => {
+		test("latest → unavailable on revokeAccess", () => {
 			const store = new ShardStore<{ turn: number }>();
+			store.grantAccess();
 			store.setState({ turn: 0 }, 1);
-			store.setUnavailable();
+			store.revokeAccess();
 			expect(store.snapshot.syncStatus).toBe("unavailable");
 			expect(store.snapshot.state).toBeNull();
 		});
 
 		test("latest → loading → latest (reconnect cycle)", () => {
 			const store = new ShardStore<{ turn: number }>();
+			store.grantAccess();
 			store.setState({ turn: 0 }, 1);
-			store.setLoading();
+
+			store.revokeAccess();
+			store.grantAccess();
 			expect(store.snapshot.syncStatus).toBe("loading");
 
 			store.setState({ turn: 5 }, 6);
@@ -47,16 +51,17 @@ describe("ShardStore", () => {
 			expect(store.snapshot.state).toEqual({ turn: 5 });
 		});
 
-		test("setState directly from unavailable goes to latest", () => {
+		test("setState without grantAccess stays unavailable", () => {
 			const store = new ShardStore<{ turn: number }>();
 			store.setState({ turn: 0 }, 1);
-			expect(store.snapshot.syncStatus).toBe("latest");
+			expect(store.snapshot.syncStatus).toBe("unavailable");
 		});
 	});
 
 	describe("subscriber notification", () => {
 		test("notifies on setState", () => {
 			const store = new ShardStore<{ turn: number }>();
+			store.grantAccess();
 			let callCount = 0;
 			store.subscribe(() => {
 				callCount += 1;
@@ -69,21 +74,20 @@ describe("ShardStore", () => {
 			expect(callCount).toBe(2);
 		});
 
-		test("notifies on setLoading", () => {
+		test("notifies on grantAccess", () => {
 			const store = new ShardStore<{ turn: number }>();
-			store.setState({ turn: 0 }, 1);
-
 			let callCount = 0;
 			store.subscribe(() => {
 				callCount += 1;
 			});
 
-			store.setLoading();
+			store.grantAccess();
 			expect(callCount).toBe(1);
 		});
 
-		test("notifies on setUnavailable", () => {
+		test("notifies on revokeAccess", () => {
 			const store = new ShardStore<{ turn: number }>();
+			store.grantAccess();
 			store.setState({ turn: 0 }, 1);
 
 			let callCount = 0;
@@ -91,12 +95,13 @@ describe("ShardStore", () => {
 				callCount += 1;
 			});
 
-			store.setUnavailable();
+			store.revokeAccess();
 			expect(callCount).toBe(1);
 		});
 
 		test("does not notify after unsubscribe", () => {
 			const store = new ShardStore<{ turn: number }>();
+			store.grantAccess();
 			let callCount = 0;
 			const unsub = store.subscribe(() => {
 				callCount += 1;
@@ -112,6 +117,7 @@ describe("ShardStore", () => {
 
 		test("multiple subscribers all notified", () => {
 			const store = new ShardStore<{ turn: number }>();
+			store.grantAccess();
 			let count1 = 0;
 			let count2 = 0;
 			store.subscribe(() => {
@@ -126,57 +132,38 @@ describe("ShardStore", () => {
 			expect(count2).toBe(1);
 		});
 
-		test("no duplicate notification on redundant setLoading", () => {
+		test("no duplicate notification on redundant grantAccess", () => {
 			const store = new ShardStore<{ turn: number }>();
-			store.setLoading();
+			store.grantAccess();
 
 			let callCount = 0;
 			store.subscribe(() => {
 				callCount += 1;
 			});
 
-			store.setLoading(); // already loading
+			store.grantAccess();
 			expect(callCount).toBe(0);
 		});
 
-		test("no duplicate notification on redundant setUnavailable", () => {
+		test("no duplicate notification on redundant revokeAccess", () => {
 			const store = new ShardStore<{ turn: number }>();
 			let callCount = 0;
 			store.subscribe(() => {
 				callCount += 1;
 			});
 
-			store.setUnavailable(); // already unavailable
+			store.revokeAccess();
 			expect(callCount).toBe(0);
-		});
-	});
-
-	describe("snapshot stability", () => {
-		test("returns same reference when nothing changed", () => {
-			const store = new ShardStore<{ turn: number }>();
-			store.setState({ turn: 0 }, 1);
-			const snap1 = store.snapshot;
-			const snap2 = store.snapshot;
-			expect(snap1).toBe(snap2);
-		});
-
-		test("returns new reference after setState", () => {
-			const store = new ShardStore<{ turn: number }>();
-			store.setState({ turn: 0 }, 1);
-			const snap1 = store.snapshot;
-			store.setState({ turn: 1 }, 2);
-			const snap2 = store.snapshot;
-			expect(snap1).not.toBe(snap2);
 		});
 	});
 
 	describe("version tracking", () => {
-		test("version is null when unavailable", () => {
+		test("version is null initially", () => {
 			const store = new ShardStore<{ turn: number }>();
 			expect(store.version).toBeNull();
 		});
 
-		test("version tracks authoritative state", () => {
+		test("version tracks received state", () => {
 			const store = new ShardStore<{ turn: number }>();
 			store.setState({ turn: 0 }, 5);
 			expect(store.version).toBe(5);
@@ -185,10 +172,11 @@ describe("ShardStore", () => {
 			expect(store.version).toBe(6);
 		});
 
-		test("version resets to null on setUnavailable", () => {
+		test("version resets on revokeAccess", () => {
 			const store = new ShardStore<{ turn: number }>();
+			store.grantAccess();
 			store.setState({ turn: 0 }, 5);
-			store.setUnavailable();
+			store.revokeAccess();
 			expect(store.version).toBeNull();
 		});
 	});

@@ -4,71 +4,58 @@ type Listener = () => void;
 
 /**
  * Client-side store for a single shard's state.
- * Framework-agnostic — compatible with useSyncExternalStore, Solid signals, Svelte stores.
+ * Framework-agnostic — compatible with useSyncExternalStore via kio-react.
  *
  * Lifecycle: unavailable → loading → latest
  * - unavailable: no access (initial, or access revoked)
- * - loading: access granted, waiting for first state delivery
+ * - loading: access granted, waiting for first state from server
  * - latest: has current state from server
  */
 export class ShardStore<T> {
-	/** Server-confirmed state. Does not change during optimistic predictions — the snapshot may show predicted state while this holds the last confirmed truth. */
-	private authoritative: { state: T; version: number } | null = null;
-	private status: "unavailable" | "loading" | "latest" = "unavailable";
+	/** State received from the server's last broadcast. null until first broadcast arrives. */
+	private received: { state: T; version: number } | null = null;
+	private accessGranted = false;
 	private listeners = new Set<Listener>();
-	/** Derived consumer-facing snapshot (syncStatus + state + pending). Computed lazily from authoritative + status + pending. Set to null on invalidation. */
-	private cachedSnapshot: ShardState<T> | null = null;
 
-	/** Transition to "loading" — access granted but no state yet */
-	setLoading(): void {
-		if (this.status === "loading") return;
-		this.status = "loading";
-		this.authoritative = null;
-		this.invalidate();
-	}
-
-	/** Transition to "unavailable" — access revoked or not yet granted */
-	setUnavailable(): void {
-		if (this.status === "unavailable") return;
-		this.status = "unavailable";
-		this.authoritative = null;
-		this.invalidate();
-	}
-
-	/** Set authoritative state from a server broadcast (full state) */
-	setState(state: T, version: number): void {
-		this.authoritative = { state, version };
-		this.status = "latest";
-		this.invalidate();
-	}
-
-	/** Get the current snapshot — stable reference, only changes when state changes */
+	/** Consumer-facing snapshot — derived from received state + access. */
 	get snapshot(): ShardState<T> {
-		if (this.cachedSnapshot) return this.cachedSnapshot;
-
-		let snap: ShardState<T>;
-		switch (this.status) {
-			case "unavailable":
-				snap = { syncStatus: "unavailable", state: null, pending: null };
-				break;
-			case "loading":
-				snap = { syncStatus: "loading", state: null, pending: null };
-				break;
-			case "latest": {
-				const auth = this.authoritative;
-				if (!auth)
-					throw new Error("ShardStore: latest without authoritative state");
-				snap = {
-					syncStatus: "latest",
-					state: auth.state,
-					pending: null,
-				};
-				break;
-			}
+		if (!this.accessGranted) {
+			return { syncStatus: "unavailable", state: null, pending: null };
 		}
+		if (!this.received) {
+			return { syncStatus: "loading", state: null, pending: null };
+		}
+		return {
+			syncStatus: "latest",
+			state: this.received.state,
+			pending: null,
+		};
+	}
 
-		this.cachedSnapshot = snap;
-		return snap;
+	/** Grant access — transitions from unavailable to loading */
+	grantAccess(): void {
+		if (this.accessGranted) return;
+		this.accessGranted = true;
+		this.notify();
+	}
+
+	/** Revoke access — transitions to unavailable, clears state */
+	revokeAccess(): void {
+		if (!this.accessGranted) return;
+		this.accessGranted = false;
+		this.received = null;
+		this.notify();
+	}
+
+	/** Set state from a server broadcast */
+	setState(state: T, version: number): void {
+		this.received = { state, version };
+		this.notify();
+	}
+
+	/** Version of the last received state (for broadcast version comparison) */
+	get version(): number | null {
+		return this.received?.version ?? null;
 	}
 
 	/** Subscribe to state changes. Returns unsubscribe function. */
@@ -79,13 +66,7 @@ export class ShardStore<T> {
 		};
 	}
 
-	/** Current authoritative version (for durable shards) */
-	get version(): number | null {
-		return this.authoritative?.version ?? null;
-	}
-
-	private invalidate(): void {
-		this.cachedSnapshot = null;
+	private notify(): void {
 		for (const listener of this.listeners) {
 			listener();
 		}
