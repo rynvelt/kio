@@ -2,6 +2,13 @@ import type { BroadcastShardEntry } from "./broadcast";
 
 // ── Client → Server messages ─────────────────────────────────────────
 
+/** Client requests connection with its local shard versions (empty on first connect) */
+export interface ConnectMessage {
+	readonly type: "connect";
+	readonly shardVersions: Record<string, number>;
+}
+
+/** Client submits an operation */
 export interface SubmitMessage {
 	readonly type: "submit";
 	readonly channelId: string;
@@ -11,10 +18,17 @@ export interface SubmitMessage {
 	readonly shardVersions: Record<string, number>;
 }
 
-export type ClientMessage = SubmitMessage;
+export type ClientMessage = ConnectMessage | SubmitMessage;
 
 // ── Server → Client messages ─────────────────────────────────────────
 
+/** Server tells client the current version per subscribed shard */
+export interface ManifestMessage {
+	readonly type: "manifest";
+	readonly versions: Record<string, number>;
+}
+
+/** Server sends shard state updates (full state or patches) */
 export interface BroadcastServerMessage {
 	readonly type: "broadcast";
 	readonly channelId: string;
@@ -22,11 +36,18 @@ export interface BroadcastServerMessage {
 	readonly shards: readonly BroadcastShardEntry[];
 }
 
+/** Server signals initial sync is complete — client can start submitting */
+export interface ReadyMessage {
+	readonly type: "ready";
+}
+
+/** Server confirms an operation was applied */
 export interface AcknowledgeMessage {
 	readonly type: "acknowledge";
 	readonly opId: string;
 }
 
+/** Server rejects an operation */
 export interface RejectMessage {
 	readonly type: "reject";
 	readonly opId: string;
@@ -35,7 +56,9 @@ export interface RejectMessage {
 }
 
 export type ServerMessage =
+	| ManifestMessage
 	| BroadcastServerMessage
+	| ReadyMessage
 	| AcknowledgeMessage
 	| RejectMessage;
 

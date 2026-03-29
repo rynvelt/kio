@@ -22,8 +22,11 @@ describe("DirectTransport", () => {
 
 		expect(received).toHaveLength(1);
 		expect(received[0]?.connectionId).toBe("direct");
-		expect(received[0]?.message.type).toBe("submit");
-		expect(received[0]?.message.operationName).toBe("advanceTurn");
+		const msg = received[0]?.message;
+		expect(msg?.type).toBe("submit");
+		if (msg?.type === "submit") {
+			expect(msg.operationName).toBe("advanceTurn");
+		}
 	});
 
 	test("server send reaches client handler", () => {
