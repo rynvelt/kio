@@ -5,6 +5,7 @@ import {
 	type BroadcastMessage,
 	type Subscriber,
 } from "./broadcast";
+import { expectToBeDefined } from "./test-helpers";
 
 function createSubscriber(
 	id: string,
@@ -45,9 +46,10 @@ describe("BroadcastManager — broadcastPatches", () => {
 		expect(sub.messages).toHaveLength(1);
 		expect(sub.messages[0]?.shards).toHaveLength(1);
 		const entry = sub.messages[0]?.shards[0];
-		expect(entry?.shardId).toBe("world");
-		expect(entry?.version).toBe(2);
-		expect(entry && "patches" in entry).toBe(true);
+		expectToBeDefined(entry);
+		expect(entry.shardId).toBe("world");
+		expect(entry.version).toBe(2);
+		expect("patches" in entry).toBe(true);
 	});
 
 	test("does not send to unsubscribed shards", () => {
@@ -81,8 +83,9 @@ describe("BroadcastManager — broadcastPatches", () => {
 		broadcastPatches(mgr);
 
 		const entry = sub.messages[0]?.shards[0];
-		expect(entry?.causedBy?.operation).toBe("advanceTurn");
-		expect(entry?.causedBy?.actor).toBe("player:alice");
+		expectToBeDefined(entry);
+		expect(entry.causedBy?.operation).toBe("advanceTurn");
+		expect(entry.causedBy?.actor).toBe("player:alice");
 	});
 
 	test("removed subscriber receives nothing", () => {
@@ -113,9 +116,10 @@ describe("BroadcastManager — onShardChanged + broadcastDirtyShards", () => {
 
 		expect(sub.messages).toHaveLength(1);
 		const entry = sub.messages[0]?.shards[0];
-		expect(entry?.shardId).toBe("player:bob");
-		expect(entry && "state" in entry).toBe(true);
-		if (entry && "state" in entry) {
+		expectToBeDefined(entry);
+		expect(entry.shardId).toBe("player:bob");
+		expect("state" in entry).toBe(true);
+		if ("state" in entry) {
 			expect(entry.state).toEqual({ gps: { lat: 1, lng: 2 } });
 		}
 	});
@@ -152,7 +156,8 @@ describe("BroadcastManager — onShardChanged + broadcastDirtyShards", () => {
 
 		expect(sub.messages).toHaveLength(1);
 		const entry = sub.messages[0]?.shards[0];
-		if (entry && "state" in entry) {
+		expectToBeDefined(entry);
+		if ("state" in entry) {
 			expect(entry.state).toEqual({ gps: { lat: 9, lng: 9 } });
 			expect(entry.version).toBe(5);
 		}

@@ -5,6 +5,8 @@ import { createDirectTransport } from "./direct-transport";
 import { channel, engine, shard } from "./index";
 import { MemoryStateAdapter } from "./persistence";
 import { createServer } from "./server";
+import { expectToBeDefined } from "./test-helpers";
+import type { ServerMessage } from "./transport";
 
 function createSubscriber(
 	id: string,
@@ -203,7 +205,7 @@ describe("createServer", () => {
 				transport: serverTransport,
 			});
 
-			const received: import("./transport").ServerMessage[] = [];
+			const received: ServerMessage[] = [];
 			client.onMessage((msg) => received.push(msg));
 
 			client.send({
@@ -218,9 +220,11 @@ describe("createServer", () => {
 			await new Promise((r) => setTimeout(r, 10));
 
 			expect(received).toHaveLength(1);
-			expect(received[0]?.type).toBe("acknowledge");
-			if (received[0]?.type === "acknowledge") {
-				expect(received[0].opId).toBe("op-1");
+			const ack = received[0];
+			expectToBeDefined(ack);
+			expect(ack.type).toBe("acknowledge");
+			if (ack.type === "acknowledge") {
+				expect(ack.opId).toBe("op-1");
 			}
 		});
 
@@ -237,7 +241,7 @@ describe("createServer", () => {
 				transport: serverTransport,
 			});
 
-			const received: import("./transport").ServerMessage[] = [];
+			const received: ServerMessage[] = [];
 			client.onMessage((msg) => received.push(msg));
 
 			client.send({
@@ -251,7 +255,8 @@ describe("createServer", () => {
 			await new Promise((r) => setTimeout(r, 10));
 
 			expect(received).toHaveLength(1);
-			expect(received[0]?.type).toBe("reject");
+			expectToBeDefined(received[0]);
+			expect(received[0].type).toBe("reject");
 		});
 
 		test("transport subscriber receives broadcasts", async () => {
@@ -271,7 +276,7 @@ describe("createServer", () => {
 				transport: serverTransport,
 			});
 
-			const received: import("./transport").ServerMessage[] = [];
+			const received: ServerMessage[] = [];
 			client.onMessage((msg) => received.push(msg));
 
 			server.addTransportSubscriber("game", connectionId, ["world"]);
@@ -280,9 +285,11 @@ describe("createServer", () => {
 
 			const broadcasts = received.filter((m) => m.type === "broadcast");
 			expect(broadcasts).toHaveLength(1);
-			if (broadcasts[0]?.type === "broadcast") {
-				expect(broadcasts[0].channelId).toBe("game");
-				expect(broadcasts[0].shards).toHaveLength(1);
+			const bc = broadcasts[0];
+			expectToBeDefined(bc);
+			if (bc.type === "broadcast") {
+				expect(bc.channelId).toBe("game");
+				expect(bc.shards).toHaveLength(1);
 			}
 		});
 
@@ -293,7 +300,7 @@ describe("createServer", () => {
 				transport: serverTransport,
 			});
 
-			const received: import("./transport").ServerMessage[] = [];
+			const received: ServerMessage[] = [];
 			client.onMessage((msg) => received.push(msg));
 
 			client.send({
@@ -307,9 +314,11 @@ describe("createServer", () => {
 			await new Promise((r) => setTimeout(r, 10));
 
 			expect(received).toHaveLength(1);
-			expect(received[0]?.type).toBe("reject");
-			if (received[0]?.type === "reject") {
-				expect(received[0].code).toBe("INVALID_CHANNEL");
+			const reject = received[0];
+			expectToBeDefined(reject);
+			expect(reject.type).toBe("reject");
+			if (reject.type === "reject") {
+				expect(reject.code).toBe("INVALID_CHANNEL");
 			}
 		});
 	});
@@ -335,7 +344,7 @@ describe("createServer", () => {
 				],
 			});
 
-			const received: import("./transport").ServerMessage[] = [];
+			const received: ServerMessage[] = [];
 			client.onMessage((msg) => received.push(msg));
 
 			connect();
@@ -343,9 +352,11 @@ describe("createServer", () => {
 
 			// Step 1: server sends its versions
 			expect(received).toHaveLength(1);
-			expect(received[0]?.type).toBe("versions");
-			if (received[0]?.type === "versions") {
-				expect(received[0].shards.world).toBe(1);
+			const versions = received[0];
+			expectToBeDefined(versions);
+			expect(versions.type).toBe("versions");
+			if (versions.type === "versions") {
+				expect(versions.shards.world).toBe(1);
 			}
 
 			// Step 2: client responds with its versions (empty = first connect)
@@ -353,16 +364,21 @@ describe("createServer", () => {
 
 			// Server sends state + ready
 			expect(received).toHaveLength(3);
-			expect(received[1]?.type).toBe("state");
-			if (received[1]?.type === "state") {
-				expect(received[1].channelId).toBe("game");
-				expect(received[1].shards).toHaveLength(1);
-				const entry = received[1].shards[0];
-				if (entry && "state" in entry) {
+			const stateMsg = received[1];
+			expectToBeDefined(stateMsg);
+			expect(stateMsg.type).toBe("state");
+			if (stateMsg.type === "state") {
+				expect(stateMsg.channelId).toBe("game");
+				expect(stateMsg.shards).toHaveLength(1);
+				const entry = stateMsg.shards[0];
+				expectToBeDefined(entry);
+				if ("state" in entry) {
 					expect(entry.state).toEqual({ stage: "PLAYING", turn: 0 });
 				}
 			}
-			expect(received[2]?.type).toBe("ready");
+			const readyMsg = received[2];
+			expectToBeDefined(readyMsg);
+			expect(readyMsg.type).toBe("ready");
 		});
 
 		test("client with up-to-date version receives no state", async () => {
@@ -385,7 +401,7 @@ describe("createServer", () => {
 				],
 			});
 
-			const received: import("./transport").ServerMessage[] = [];
+			const received: ServerMessage[] = [];
 			client.onMessage((msg) => received.push(msg));
 
 			connect();
@@ -396,7 +412,9 @@ describe("createServer", () => {
 
 			// Only ready — no state sent
 			expect(received).toHaveLength(2);
-			expect(received[1]?.type).toBe("ready");
+			const ready = received[1];
+			expectToBeDefined(ready);
+			expect(ready.type).toBe("ready");
 		});
 
 		test("after handshake, subscriber receives future broadcasts", async () => {
@@ -419,7 +437,7 @@ describe("createServer", () => {
 				],
 			});
 
-			const received: import("./transport").ServerMessage[] = [];
+			const received: ServerMessage[] = [];
 			client.onMessage((msg) => received.push(msg));
 
 			// Complete handshake

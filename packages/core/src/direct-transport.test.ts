@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createDirectTransport } from "./direct-transport";
+import { expectToBeDefined } from "./test-helpers";
 import type { ClientMessage, ServerMessage } from "./transport";
 
 describe("DirectTransport", () => {
@@ -20,11 +21,12 @@ describe("DirectTransport", () => {
 		});
 
 		expect(received).toHaveLength(1);
-		expect(received[0]?.connectionId).toBe("direct");
-		const msg = received[0]?.message;
-		expect(msg?.type).toBe("submit");
-		if (msg?.type === "submit") {
-			expect(msg.operationName).toBe("advanceTurn");
+		const first = received[0];
+		expectToBeDefined(first);
+		expect(first.connectionId).toBe("direct");
+		expect(first.message.type).toBe("submit");
+		if (first.message.type === "submit") {
+			expect(first.message.operationName).toBe("advanceTurn");
 		}
 	});
 
@@ -42,7 +44,8 @@ describe("DirectTransport", () => {
 		});
 
 		expect(received).toHaveLength(1);
-		expect(received[0]?.type).toBe("acknowledge");
+		expectToBeDefined(received[0]);
+		expect(received[0].type).toBe("acknowledge");
 	});
 
 	test("bidirectional communication", () => {
