@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import * as v from "valibot";
 import type { BroadcastMessage, Subscriber } from "./broadcast";
+import { createDirectTransport } from "./direct-transport";
 import { channel, engine, shard } from "./index";
 import { MemoryStateAdapter } from "./persistence";
 import { createServer } from "./server";
@@ -186,6 +187,134 @@ describe("createServer", () => {
 
 		server.broadcastDirtyShards("presence");
 		expect(presSub.messages).toHaveLength(1);
+	});
+
+	describe("transport wiring", () => {
+		test("client submit via transport returns acknowledge", async () => {
+			const adapter = new MemoryStateAdapter();
+			await adapter.compareAndSwap("game", "world", 0, {
+				stage: "PLAYING",
+				turn: 0,
+			});
+
+			const { client, server: serverTransport } = createDirectTransport();
+			createServer(setupServerEngine(), {
+				persistence: adapter,
+				transport: serverTransport,
+			});
+
+			const received: import("./transport").ServerMessage[] = [];
+			client.onMessage((msg) => received.push(msg));
+
+			client.send({
+				type: "submit",
+				channelId: "game",
+				operationName: "advanceTurn",
+				input: {},
+				opId: "op-1",
+				shardVersions: {},
+			});
+
+			// Wait for async pipeline
+			await new Promise((r) => setTimeout(r, 10));
+
+			expect(received).toHaveLength(1);
+			expect(received[0]?.type).toBe("acknowledge");
+			if (received[0]?.type === "acknowledge") {
+				expect(received[0].opId).toBe("op-1");
+			}
+		});
+
+		test("client submit via transport returns reject for bad input", async () => {
+			const adapter = new MemoryStateAdapter();
+			await adapter.compareAndSwap("game", "world", 0, {
+				stage: "PLAYING",
+				turn: 0,
+			});
+
+			const { client, server: serverTransport } = createDirectTransport();
+			createServer(setupServerEngine(), {
+				persistence: adapter,
+				transport: serverTransport,
+			});
+
+			const received: import("./transport").ServerMessage[] = [];
+			client.onMessage((msg) => received.push(msg));
+
+			client.send({
+				type: "submit",
+				channelId: "game",
+				operationName: "advanceTurn",
+				input: "invalid",
+				opId: "op-2",
+				shardVersions: {},
+			});
+
+			await new Promise((r) => setTimeout(r, 10));
+
+			expect(received).toHaveLength(1);
+			expect(received[0]?.type).toBe("reject");
+		});
+
+		test("transport subscriber receives broadcasts", async () => {
+			const adapter = new MemoryStateAdapter();
+			await adapter.compareAndSwap("game", "world", 0, {
+				stage: "PLAYING",
+				turn: 0,
+			});
+
+			const {
+				client,
+				server: serverTransport,
+				connectionId,
+			} = createDirectTransport();
+			const server = createServer(setupServerEngine(), {
+				persistence: adapter,
+				transport: serverTransport,
+			});
+
+			const received: import("./transport").ServerMessage[] = [];
+			client.onMessage((msg) => received.push(msg));
+
+			server.addTransportSubscriber("game", connectionId, ["world"]);
+
+			await server.submit("game", "advanceTurn", {});
+
+			const broadcasts = received.filter((m) => m.type === "broadcast");
+			expect(broadcasts).toHaveLength(1);
+			if (broadcasts[0]?.type === "broadcast") {
+				expect(broadcasts[0].channelId).toBe("game");
+				expect(broadcasts[0].shards).toHaveLength(1);
+			}
+		});
+
+		test("transport rejects unknown channel", async () => {
+			const { client, server: serverTransport } = createDirectTransport();
+			createServer(setupServerEngine(), {
+				persistence: new MemoryStateAdapter(),
+				transport: serverTransport,
+			});
+
+			const received: import("./transport").ServerMessage[] = [];
+			client.onMessage((msg) => received.push(msg));
+
+			client.send({
+				type: "submit",
+				channelId: "nonexistent",
+				operationName: "op",
+				input: {},
+				opId: "op-3",
+				shardVersions: {},
+			});
+
+			await new Promise((r) => setTimeout(r, 10));
+
+			expect(received).toHaveLength(1);
+			expect(received[0]?.type).toBe("reject");
+			if (received[0]?.type === "reject") {
+				expect(received[0].code).toBe("INVALID_CHANNEL");
+			}
+		});
 	});
 
 	describe("type + runtime safety", () => {

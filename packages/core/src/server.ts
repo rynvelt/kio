@@ -5,10 +5,12 @@ import type { EngineBuilder } from "./engine";
 import type { StateAdapter } from "./persistence";
 import type { Actor, AuthorizeFn, PipelineResult } from "./pipeline";
 import { KIO_SERVER_ACTOR } from "./pipeline";
+import type { ServerTransport } from "./transport";
 
 /** Configuration for createServer */
 export interface ServerConfig {
 	readonly persistence: StateAdapter;
+	readonly transport?: ServerTransport;
 	readonly authorize?: AuthorizeFn;
 	readonly onConnect?: (actor: Actor) => void;
 	readonly onDisconnect?: (actor: Actor, reason: string) => void;
@@ -61,6 +63,22 @@ export interface Server<TChannels extends object = object> {
 		subscriberId: string,
 	): void;
 
+	/**
+	 * Register a transport connection as a subscriber.
+	 * Broadcasts for the subscribed shards are sent via the transport.
+	 */
+	addTransportSubscriber(
+		channelName: string & keyof TChannels,
+		connectionId: string,
+		shardIds: readonly string[],
+	): void;
+
+	/** Remove a transport subscriber */
+	removeTransportSubscriber(
+		channelName: string & keyof TChannels,
+		connectionId: string,
+	): void;
+
 	/** Get a channel engine by name */
 	getChannel(channelName: string & keyof TChannels): ChannelEngine | undefined;
 }
@@ -71,6 +89,7 @@ export function createServer<TChannels extends object>(
 	config: ServerConfig,
 ): Server<TChannels> {
 	const channels = new Map<string, ChannelEngine>();
+	const { transport } = config;
 
 	for (const [name, channelData] of engineBuilder["~channels"]) {
 		channels.set(
@@ -87,6 +106,60 @@ export function createServer<TChannels extends object>(
 			throw new Error(`Channel "${channelName}" is not registered`);
 		}
 		return ch;
+	}
+
+	// Wire transport: receive client submissions, route to channel engine
+	if (transport) {
+		transport.onMessage(async (connectionId, message) => {
+			if (message.type === "submit") {
+				const ch = channels.get(message.channelId);
+				if (!ch) {
+					transport.send(connectionId, {
+						type: "reject",
+						opId: message.opId,
+						code: "INVALID_CHANNEL",
+						message: `Channel "${message.channelId}" is not registered`,
+					});
+					return;
+				}
+
+				const result = await ch.submit({
+					operationName: message.operationName,
+					input: message.input,
+					actor: { actorId: connectionId },
+					opId: message.opId,
+				});
+
+				if (result.status === "acknowledged") {
+					transport.send(connectionId, {
+						type: "acknowledge",
+						opId: message.opId,
+					});
+				} else {
+					transport.send(connectionId, {
+						type: "reject",
+						opId: message.opId,
+						code: result.code,
+						message: result.message,
+					});
+				}
+			}
+		});
+	}
+
+	/** Create a Subscriber that sends broadcasts via the transport */
+	function createTransportSubscriber(connectionId: string): Subscriber {
+		return {
+			id: connectionId,
+			send(message) {
+				transport?.send(connectionId, {
+					type: "broadcast",
+					channelId: message.channelId,
+					kind: message.kind,
+					shards: message.shards,
+				});
+			},
+		};
 	}
 
 	return {
@@ -112,6 +185,16 @@ export function createServer<TChannels extends object>(
 		removeSubscriber(channelName, subscriberId) {
 			const ch = getChannelOrThrow(channelName);
 			ch.removeSubscriber(subscriberId);
+		},
+
+		addTransportSubscriber(channelName, connectionId, shardIds) {
+			const ch = getChannelOrThrow(channelName);
+			ch.addSubscriber(createTransportSubscriber(connectionId), shardIds);
+		},
+
+		removeTransportSubscriber(channelName, connectionId) {
+			const ch = getChannelOrThrow(channelName);
+			ch.removeSubscriber(connectionId);
 		},
 
 		getChannel(channelName) {
