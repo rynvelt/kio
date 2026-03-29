@@ -108,6 +108,24 @@ export class ChannelEngine {
 		);
 	}
 
+	/** Load shard states for initial sync. Returns shardId → { state, version }. */
+	async loadShardStates(
+		shardIds: readonly string[],
+	): Promise<Map<string, { state: unknown; version: number }>> {
+		const refs = shardIds.map((id) => {
+			const parts = id.split(":");
+			return { shardType: parts[0] ?? id, shardId: id };
+		});
+		const loaded = await this.stateManager.loadShards(refs);
+		const result = new Map<string, { state: unknown; version: number }>();
+		for (const [shardId, cached] of loaded) {
+			if (cached.state !== undefined) {
+				result.set(shardId, { state: cached.state, version: cached.version });
+			}
+		}
+		return result;
+	}
+
 	get name(): string {
 		return this.channelData.name;
 	}

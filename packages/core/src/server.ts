@@ -7,11 +7,18 @@ import type { Actor, AuthorizeFn, PipelineResult } from "./pipeline";
 import { KIO_SERVER_ACTOR } from "./pipeline";
 import type { ServerTransport } from "./transport";
 
+/** Subscription entry: which channel and which shards */
+export interface SubscriptionRef {
+	readonly channelId: string;
+	readonly shardIds: readonly string[];
+}
+
 /** Configuration for createServer */
 export interface ServerConfig {
 	readonly persistence: StateAdapter;
 	readonly transport?: ServerTransport;
 	readonly authorize?: AuthorizeFn;
+	readonly defaultSubscriptions?: (actor: Actor) => readonly SubscriptionRef[];
 	readonly onConnect?: (actor: Actor) => void;
 	readonly onDisconnect?: (actor: Actor, reason: string) => void;
 }
@@ -63,10 +70,7 @@ export interface Server<TChannels extends object = object> {
 		subscriberId: string,
 	): void;
 
-	/**
-	 * Register a transport connection as a subscriber.
-	 * Broadcasts for the subscribed shards are sent via the transport.
-	 */
+	/** Register a transport connection as a subscriber */
 	addTransportSubscriber(
 		channelName: string & keyof TChannels,
 		connectionId: string,
@@ -108,9 +112,127 @@ export function createServer<TChannels extends object>(
 		return ch;
 	}
 
-	// Wire transport: receive client submissions, route to channel engine
+	/** Create a Subscriber that sends broadcasts via the transport */
+	function createTransportSubscriber(connectionId: string): Subscriber {
+		return {
+			id: connectionId,
+			send(message) {
+				transport?.send(connectionId, {
+					type: "broadcast",
+					channelId: message.channelId,
+					kind: message.kind,
+					shards: message.shards,
+				});
+			},
+		};
+	}
+
+	// Per-connection state between handshake steps
+	const pendingConnections = new Map<
+		string,
+		{
+			actor: Actor;
+			channelStates: Array<{
+				channelId: string;
+				kind: "durable" | "ephemeral";
+				shardStates: Map<string, { state: unknown; version: number }>;
+			}>;
+		}
+	>();
+
+	/**
+	 * Handshake step 1: transport signals client connected.
+	 * Server determines subscriptions, loads shard states, sends server versions.
+	 */
+	async function handleConnection(connectionId: string): Promise<void> {
+		const actor: Actor = { actorId: connectionId };
+		const subscriptions = config.defaultSubscriptions?.(actor) ?? [];
+
+		const channelStates: Array<{
+			channelId: string;
+			kind: "durable" | "ephemeral";
+			shardStates: Map<string, { state: unknown; version: number }>;
+		}> = [];
+		const serverVersions: Record<string, number> = {};
+
+		for (const sub of subscriptions) {
+			const ch = channels.get(sub.channelId);
+			if (!ch) continue;
+
+			ch.addSubscriber(createTransportSubscriber(connectionId), sub.shardIds);
+
+			const shardStates = await ch.loadShardStates(sub.shardIds);
+			channelStates.push({
+				channelId: sub.channelId,
+				kind: ch.kind,
+				shardStates,
+			});
+
+			for (const [shardId, { version }] of shardStates) {
+				serverVersions[shardId] = version;
+			}
+		}
+
+		pendingConnections.set(connectionId, { actor, channelStates });
+
+		transport?.send(connectionId, {
+			type: "versions",
+			shards: serverVersions,
+		});
+	}
+
+	/**
+	 * Handshake step 2: client sends its versions.
+	 * Server diffs, sends only shards where client is behind, then ready.
+	 */
+	function handleClientVersions(
+		connectionId: string,
+		clientVersions: Record<string, number>,
+	): void {
+		const pending = pendingConnections.get(connectionId);
+		if (!pending) return;
+		pendingConnections.delete(connectionId);
+
+		for (const { channelId, kind, shardStates } of pending.channelStates) {
+			const entries: Array<{
+				shardId: string;
+				version: number;
+				state: unknown;
+			}> = [];
+
+			for (const [shardId, { state, version }] of shardStates) {
+				const clientVersion = clientVersions[shardId] ?? 0;
+				if (version > clientVersion) {
+					entries.push({ shardId, version, state });
+				}
+			}
+
+			if (entries.length > 0) {
+				transport?.send(connectionId, {
+					type: "state",
+					channelId,
+					kind,
+					shards: entries,
+				});
+			}
+		}
+
+		transport?.send(connectionId, { type: "ready" });
+		config.onConnect?.(pending.actor);
+	}
+
+	// Wire transport
 	if (transport) {
+		transport.onConnection(async (connectionId) => {
+			await handleConnection(connectionId);
+		});
+
 		transport.onMessage(async (connectionId, message) => {
+			if (message.type === "versions") {
+				handleClientVersions(connectionId, message.shards);
+				return;
+			}
+
 			if (message.type === "submit") {
 				const ch = channels.get(message.channelId);
 				if (!ch) {
@@ -145,21 +267,6 @@ export function createServer<TChannels extends object>(
 				}
 			}
 		});
-	}
-
-	/** Create a Subscriber that sends broadcasts via the transport */
-	function createTransportSubscriber(connectionId: string): Subscriber {
-		return {
-			id: connectionId,
-			send(message) {
-				transport?.send(connectionId, {
-					type: "broadcast",
-					channelId: message.channelId,
-					kind: message.kind,
-					shards: message.shards,
-				});
-			},
-		};
 	}
 
 	return {

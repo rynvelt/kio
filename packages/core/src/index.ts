@@ -40,11 +40,11 @@ export type {
 	BroadcastServerMessage,
 	ClientMessage,
 	ClientTransport,
-	ConnectMessage,
-	ManifestMessage,
 	ReadyMessage,
 	RejectMessage,
 	ServerMessage,
 	ServerTransport,
+	StateMessage,
 	SubmitMessage,
+	VersionsMessage,
 } from "./transport";

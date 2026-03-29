@@ -212,7 +212,6 @@ describe("createServer", () => {
 				operationName: "advanceTurn",
 				input: {},
 				opId: "op-1",
-				shardVersions: {},
 			});
 
 			// Wait for async pipeline
@@ -247,7 +246,6 @@ describe("createServer", () => {
 				operationName: "advanceTurn",
 				input: "invalid",
 				opId: "op-2",
-				shardVersions: {},
 			});
 
 			await new Promise((r) => setTimeout(r, 10));
@@ -304,7 +302,6 @@ describe("createServer", () => {
 				operationName: "op",
 				input: {},
 				opId: "op-3",
-				shardVersions: {},
 			});
 
 			await new Promise((r) => setTimeout(r, 10));
@@ -314,6 +311,130 @@ describe("createServer", () => {
 			if (received[0]?.type === "reject") {
 				expect(received[0].code).toBe("INVALID_CHANNEL");
 			}
+		});
+	});
+
+	describe("connection handshake", () => {
+		test("connect sends server versions, client responds, gets state + ready", async () => {
+			const adapter = new MemoryStateAdapter();
+			await adapter.compareAndSwap("game", "world", 0, {
+				stage: "PLAYING",
+				turn: 0,
+			});
+
+			const {
+				client,
+				server: serverTransport,
+				connect,
+			} = createDirectTransport();
+			createServer(setupServerEngine(), {
+				persistence: adapter,
+				transport: serverTransport,
+				defaultSubscriptions: () => [
+					{ channelId: "game", shardIds: ["world"] },
+				],
+			});
+
+			const received: import("./transport").ServerMessage[] = [];
+			client.onMessage((msg) => received.push(msg));
+
+			connect();
+			await new Promise((r) => setTimeout(r, 10));
+
+			// Step 1: server sends its versions
+			expect(received).toHaveLength(1);
+			expect(received[0]?.type).toBe("versions");
+			if (received[0]?.type === "versions") {
+				expect(received[0].shards.world).toBe(1);
+			}
+
+			// Step 2: client responds with its versions (empty = first connect)
+			client.send({ type: "versions", shards: {} });
+
+			// Server sends state + ready
+			expect(received).toHaveLength(3);
+			expect(received[1]?.type).toBe("state");
+			if (received[1]?.type === "state") {
+				expect(received[1].channelId).toBe("game");
+				expect(received[1].shards).toHaveLength(1);
+				const entry = received[1].shards[0];
+				if (entry && "state" in entry) {
+					expect(entry.state).toEqual({ stage: "PLAYING", turn: 0 });
+				}
+			}
+			expect(received[2]?.type).toBe("ready");
+		});
+
+		test("client with up-to-date version receives no state", async () => {
+			const adapter = new MemoryStateAdapter();
+			await adapter.compareAndSwap("game", "world", 0, {
+				stage: "PLAYING",
+				turn: 0,
+			});
+
+			const {
+				client,
+				server: serverTransport,
+				connect,
+			} = createDirectTransport();
+			createServer(setupServerEngine(), {
+				persistence: adapter,
+				transport: serverTransport,
+				defaultSubscriptions: () => [
+					{ channelId: "game", shardIds: ["world"] },
+				],
+			});
+
+			const received: import("./transport").ServerMessage[] = [];
+			client.onMessage((msg) => received.push(msg));
+
+			connect();
+			await new Promise((r) => setTimeout(r, 10));
+
+			// Client already has version 1
+			client.send({ type: "versions", shards: { world: 1 } });
+
+			// Only ready — no state sent
+			expect(received).toHaveLength(2);
+			expect(received[1]?.type).toBe("ready");
+		});
+
+		test("after handshake, subscriber receives future broadcasts", async () => {
+			const adapter = new MemoryStateAdapter();
+			await adapter.compareAndSwap("game", "world", 0, {
+				stage: "PLAYING",
+				turn: 0,
+			});
+
+			const {
+				client,
+				server: serverTransport,
+				connect,
+			} = createDirectTransport();
+			const server = createServer(setupServerEngine(), {
+				persistence: adapter,
+				transport: serverTransport,
+				defaultSubscriptions: () => [
+					{ channelId: "game", shardIds: ["world"] },
+				],
+			});
+
+			const received: import("./transport").ServerMessage[] = [];
+			client.onMessage((msg) => received.push(msg));
+
+			// Complete handshake
+			connect();
+			await new Promise((r) => setTimeout(r, 10));
+			client.send({ type: "versions", shards: {} });
+
+			const handshakeCount = received.length;
+
+			// Server submits — should broadcast to connected client
+			await server.submit("game", "advanceTurn", {});
+
+			const newMessages = received.slice(handshakeCount);
+			const broadcasts = newMessages.filter((m) => m.type === "broadcast");
+			expect(broadcasts).toHaveLength(1);
 		});
 	});
 

@@ -17,7 +17,6 @@ describe("DirectTransport", () => {
 			operationName: "advanceTurn",
 			input: {},
 			opId: "op-1",
-			shardVersions: {},
 		});
 
 		expect(received).toHaveLength(1);
@@ -64,7 +63,6 @@ describe("DirectTransport", () => {
 			operationName: "op",
 			input: {},
 			opId: "op-1",
-			shardVersions: {},
 		});
 
 		server.send(connectionId, {
@@ -86,9 +84,8 @@ describe("DirectTransport", () => {
 				operationName: "op",
 				input: {},
 				opId: "op-1",
-				shardVersions: {},
 			});
-		}).toThrow("server handler not registered");
+		}).toThrow("server message handler not registered");
 	});
 
 	test("throws if client handler not registered", () => {
@@ -99,6 +96,6 @@ describe("DirectTransport", () => {
 				type: "acknowledge",
 				opId: "op-1",
 			});
-		}).toThrow("client handler not registered");
+		}).toThrow("client message handler not registered");
 	});
 });

@@ -10,39 +10,64 @@ const CONNECTION_ID = "direct";
 /**
  * In-process transport for testing.
  * Connects a client and server directly — no serialization, no network.
- * send() on one side calls onMessage() on the other synchronously.
+ * Call connect() to initiate the connection handshake.
  */
 export function createDirectTransport(): {
 	client: ClientTransport;
 	server: ServerTransport;
+	/** Initiate the connection — fires onConnection on server, onConnected on client */
+	connect: () => void;
 	connectionId: string;
 } {
-	let clientHandler: ((message: ServerMessage) => void) | null = null;
-	let serverHandler:
+	let clientMessageHandler: ((message: ServerMessage) => void) | null = null;
+	let clientConnectedHandler: (() => void) | null = null;
+	let serverMessageHandler:
 		| ((connectionId: string, message: ClientMessage) => void)
 		| null = null;
+	let serverConnectionHandler: ((connectionId: string) => void) | null = null;
 
 	const client: ClientTransport = {
 		send(message) {
-			if (!serverHandler)
-				throw new Error("DirectTransport: server handler not registered");
-			serverHandler(CONNECTION_ID, message);
+			if (!serverMessageHandler)
+				throw new Error(
+					"DirectTransport: server message handler not registered",
+				);
+			serverMessageHandler(CONNECTION_ID, message);
 		},
 		onMessage(handler) {
-			clientHandler = handler;
+			clientMessageHandler = handler;
+		},
+		onConnected(handler) {
+			clientConnectedHandler = handler;
+		},
+		onDisconnected() {
+			// Not implemented for direct transport
 		},
 	};
 
 	const server: ServerTransport = {
 		send(_connectionId, message) {
-			if (!clientHandler)
-				throw new Error("DirectTransport: client handler not registered");
-			clientHandler(message);
+			if (!clientMessageHandler)
+				throw new Error(
+					"DirectTransport: client message handler not registered",
+				);
+			clientMessageHandler(message);
 		},
 		onMessage(handler) {
-			serverHandler = handler;
+			serverMessageHandler = handler;
+		},
+		onConnection(handler) {
+			serverConnectionHandler = handler;
+		},
+		onDisconnection() {
+			// Not implemented for direct transport
 		},
 	};
 
-	return { client, server, connectionId: CONNECTION_ID };
+	function connect() {
+		serverConnectionHandler?.(CONNECTION_ID);
+		clientConnectedHandler?.();
+	}
+
+	return { client, server, connect, connectionId: CONNECTION_ID };
 }

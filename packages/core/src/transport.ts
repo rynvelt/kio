@@ -1,12 +1,14 @@
 import type { BroadcastShardEntry } from "./broadcast";
 
-// ── Client → Server messages ─────────────────────────────────────────
+// ── Bidirectional messages ───────────────────────────────────────────
 
-/** Client requests connection with its local shard versions (empty on first connect) */
-export interface ConnectMessage {
-	readonly type: "connect";
-	readonly shardVersions: Record<string, number>;
+/** Both client and server send their shard versions during connection handshake */
+export interface VersionsMessage {
+	readonly type: "versions";
+	readonly shards: Record<string, number>;
 }
+
+// ── Client → Server messages ─────────────────────────────────────────
 
 /** Client submits an operation */
 export interface SubmitMessage {
@@ -15,20 +17,21 @@ export interface SubmitMessage {
 	readonly operationName: string;
 	readonly input: unknown;
 	readonly opId: string;
-	readonly shardVersions: Record<string, number>;
 }
 
-export type ClientMessage = ConnectMessage | SubmitMessage;
+export type ClientMessage = VersionsMessage | SubmitMessage;
 
 // ── Server → Client messages ─────────────────────────────────────────
 
-/** Server tells client the current version per subscribed shard */
-export interface ManifestMessage {
-	readonly type: "manifest";
-	readonly versions: Record<string, number>;
+/** Server sends shard state to a specific client (initial sync after handshake) */
+export interface StateMessage {
+	readonly type: "state";
+	readonly channelId: string;
+	readonly kind: "durable" | "ephemeral";
+	readonly shards: readonly BroadcastShardEntry[];
 }
 
-/** Server sends shard state updates (full state or patches) */
+/** Server broadcasts shard updates to all subscribers of affected shards */
 export interface BroadcastServerMessage {
 	readonly type: "broadcast";
 	readonly channelId: string;
@@ -56,7 +59,8 @@ export interface RejectMessage {
 }
 
 export type ServerMessage =
-	| ManifestMessage
+	| VersionsMessage
+	| StateMessage
 	| BroadcastServerMessage
 	| ReadyMessage
 	| AcknowledgeMessage
@@ -64,16 +68,22 @@ export type ServerMessage =
 
 // ── Transport interfaces ─────────────────────────────────────────────
 
-/** Client-side transport — sends messages to server, receives from server */
+/** Client-side transport */
 export interface ClientTransport {
 	send(message: ClientMessage): void;
 	onMessage(handler: (message: ServerMessage) => void): void;
+	onConnected(handler: () => void): void;
+	onDisconnected(handler: (reason: string) => void): void;
 }
 
-/** Server-side transport — sends messages to clients, receives from clients */
+/** Server-side transport */
 export interface ServerTransport {
 	send(connectionId: string, message: ServerMessage): void;
 	onMessage(
 		handler: (connectionId: string, message: ClientMessage) => void,
+	): void;
+	onConnection(handler: (connectionId: string) => void): void;
+	onDisconnection(
+		handler: (connectionId: string, reason: string) => void,
 	): void;
 }
