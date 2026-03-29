@@ -1,15 +1,12 @@
 # Phase 5: Client-Server Loop
 
-## Status: Steps 1-3 complete, step 4 needs connection handshake first
+## Status: Complete ✅
 
 ## Goal
 
 End-to-end: client submits operation → server processes → broadcast → client ShardStore updates.
-Using a direct-call transport (typed messages, no serialization, no network).
 
 ## Architecture
-
-See VISION_v2.md Section 6 for the full transport/connection spec.
 
 ```
 createClient(clientEngine, { transport })
@@ -17,71 +14,45 @@ createClient(clientEngine, { transport })
 
 DirectTransport (passes typed messages in-process)
 
-createServer(serverEngine, { transport, persistence }) [exists, transport wired]
-  └─ ChannelEngine (per channel) [exists]
+createServer(serverEngine, { transport, persistence })
+  └─ ChannelEngine (per channel)
 ```
 
-## Connection handshake (from vision doc Section 6)
+## Connection handshake (as implemented)
 
 ```
-1. Client connects with intent + local shard versions (empty on first connect)
-2. Server authenticates
-3. Server determines subscriptions (from subscription shard or defaultSubscriptions hook)
-4. Server sends manifest: { shardId: serverVersion, ... }
-5. Server sends broadcast for each stale shard (full state)
-6. Server sends "ready"
+1. Transport signals connection (onConnection/onConnected)
+2. Server determines subscriptions via defaultSubscriptions(actor)
+3. Server sends: versions { shards: { world: 12, "seat:1": 8 } }
+4. Client sends: versions { shards: {} }  (empty on first connect)
+5. Server diffs, sends: state { channelId, shards } (only shards client is behind on)
+6. Server sends: ready
 ```
 
-The client doesn't decide which shards to subscribe to — the server tells it.
-ShardStores are created after the server confirms subscriptions.
+## Message types (as implemented)
 
-## Steps
+```
+Bidirectional:
+  versions { shards: Record<string, number> }
 
-### 1. Message types + transport interface ✅
+Client → Server:
+  submit { channelId, operationName, input, opId }
 
-### 2. DirectTransport ✅
+Server → Client:
+  state { channelId, kind, shards }       (initial sync, point-to-point)
+  broadcast { channelId, kind, shards }   (ongoing updates, to all subscribers)
+  acknowledge { opId }
+  reject { opId, code, message }
+  ready
+```
 
-### 3. Wire server to transport ✅
+## Steps (all complete)
 
-Server receives submit via transport, routes to ChannelEngine.
-Sends acknowledge/reject/broadcast back.
-
-### 4. Connection handshake messages
-
-Add to message types:
-- Client → Server: `{ type: "connect", shardVersions }` (intent handled by transport/query)
-- Server → Client: `{ type: "manifest", versions }`
-- Server → Client: broadcasts for stale shards (uses existing broadcast message)
-- Server → Client: `{ type: "ready" }`
-
-For the DirectTransport: connect is synchronous — client calls connect(),
-server determines subscriptions, sends manifest + state + ready, all in one call.
-
-### 5. Server connection handling
-
-Server receives connect message → runs defaultSubscriptions → determines shards →
-registers transport subscriber → sends manifest + initial state + ready.
-Simplified: no authenticate for now (DirectTransport has no auth).
-
-### 6. ClientChannelEngine
-
-Creates ShardStores in response to server messages, not client decisions:
-- Receives manifest → creates stores in "loading" state
-- Receives broadcasts → routes to stores, transitions to "latest"
-- Receives ready → connection is established
-- submit() → sends via transport, returns SubmitResult
-
-### 7. createClient
-
-Consumer-facing entry point. Creates ClientChannelEngine per channel.
-Wires transport onMessage → routes to correct ClientChannelEngine.
-Exposes: client.channel("game").submit(...), client.channel("game").shardState(...)
-Initiates connection handshake on creation.
-
-### 8. End-to-end test
-
-Full loop with correct handshake:
-- createClient + createServer + DirectTransport
-- Server determines subscriptions, sends initial state
-- Client ShardStores created and populated
-- Client submits operation → server applies → broadcast → client updates
+1. Message types + transport interface ✅
+2. DirectTransport ✅
+3. Wire server to transport ✅
+4. Connection handshake (versions exchange) ✅
+5. Server connection handling ✅
+6. ClientChannelEngine ✅
+7. createClient ✅
+8. End-to-end test ✅

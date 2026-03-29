@@ -1014,19 +1014,20 @@ Both interfaces deal in `Uint8Array` — raw bytes. The engine's `Codec` seriali
 The engine defines a small set of message types encoded/decoded by the codec:
 
 ```ts
+// Bidirectional (used in connection handshake)
+| { type: "versions", shards: Record<string, number> }
+
 // Client → Server
-| { type: "submit", opName: string, input: unknown, shardVersions: Record<string, number>, opId: string }
-// Note: recovery is not a separate message — shard versions are sent in the handshake (query params)
+| { type: "submit", channelId: string, operationName: string, input: unknown, opId: string }
 
 // Server → Client
-| { type: "manifest", versions: Record<string, number> }  // first message after connect — current server versions per shard
-| { type: "broadcast", channelId: string, kind: "durable",
-    shards: Array<DurableShardEntry> }   // see Section 3 for entry types (state or patches)
-| { type: "broadcast", channelId: string, kind: "ephemeral",
-    shards: Array<EphemeralShardEntry> } // see Section 3 for entry types (state or patches)
+| { type: "state", channelId: string, kind: "durable" | "ephemeral",
+    shards: Array<BroadcastShardEntry> }   // point-to-point initial sync
+| { type: "broadcast", channelId: string, kind: "durable" | "ephemeral",
+    shards: Array<BroadcastShardEntry> }   // to all subscribers of affected shards
 | { type: "acknowledge", opId: string }
-| { type: "reject", opId: string, error: ErrorInfo, freshShards: Record<string, { state: unknown; version: number }> }
-| { type: "ready" }  // sent after all stale shard broadcasts complete
+| { type: "reject", opId: string, code: string, message: string }
+| { type: "ready" }  // sent after initial state delivery complete
 ```
 
 The transport never inspects these — it just moves bytes.
@@ -1043,49 +1044,43 @@ The transport adapter normalizes framework-specific connection details into an `
 
 **Initial connection and reconnection:**
 
-The client includes two things in the handshake (via query params, headers, or whatever the transport supports):
-
-- **Intent** — which channel/room it wants (e.g., `?room=room:abc`)
-- **Local shard versions** — what state it already has (e.g., `?versions=world:22,seat:3:14`). Empty on first-ever connection.
+The connection handshake uses a bidirectional versions exchange. Both client and server send the same message type (`versions`) to communicate which shard versions they have. The server then sends only the state the client is missing.
 
 ```
-HTTP layer (handshake):
-  Client → Server: auth credentials + intent + local shard versions
-  Server → Client: connection accepted (just the upgrade, no data payload)
-
-Message layer (after upgrade):
-  Server → Client: manifest (current server version per subscribed shard)
-  Server → Client: broadcast for each stale shard (version > client's)
-  Server → Client: "ready"
+1. Transport signals connection (onConnection/onConnected)
+2. Server determines subscriptions (defaultSubscriptions or subscription shard)
+3. Server → Client: versions { shards: { world: 12, "seat:1": 8 } }
+4. Client → Server: versions { shards: { world: 12, "seat:1": 5 } }
+                    (empty on first-ever connection)
+5. Server diffs, sends state only for shards where client is behind:
+   Server → Client: state { channelId: "game", shards: [{ shardId: "seat:1", ... }] }
+                    (world is skipped — client already has version 12)
+6. Server → Client: ready
 ```
 
-The **manifest** is the first message after connect. It tells the client immediately which shards are up to date and which are stale (update incoming). The client can use this to show fine-grained sync status per shard — showing last known state with a "syncing..." indicator rather than a full loading screen.
+The `state` message is a point-to-point delivery to one client (not a broadcast to all subscribers). It carries the same shard entry format as broadcasts (full state or patches), scoped to one channel.
 
 The engine's perspective:
 
 ```
-1. IncomingConnection arrives with { headers, query, extra }
-   → query contains auth, intent, and shard versions
+1. Transport fires onConnection(connectionId)
 2. Engine runs authenticate(conn) → actor
 3. Engine loads (or creates) the actor's subscription shard
    → If new actor: calls defaultSubscriptions(actor) to populate initial refs
    → If subscriptionsOnConnect hook is provided: calls it instead (override)
 4. Engine determines subscribed shards from subscription shard refs
-5. Engine parses client's shard versions from conn.query
-6. Engine sends manifest: { type: "manifest", versions: { shardId: serverVersion, ... } }
-7. For each subscribed shard:
-   → server version == client version → skip (client is up to date)
-   → server version > client version  → send current state via transport.send()
-   → client didn't report this shard  → send current state
-8. Engine sends "ready" via transport.send()
-9. Engine calls consumer's onConnect(actor) hook
+5. Engine loads shard states, registers transport subscriber
+6. Engine sends versions message with server's current shard versions
+7. Client compares with local state, responds with its versions
+8. Engine diffs: for each subscribed shard where server version > client version,
+   sends current state via a state message
+9. Engine sends "ready"
+10. Engine calls consumer's onConnect(actor) hook
 ```
 
-The server sends state using the same `transport.send()` it uses for any broadcast — no special mechanism. The shard versions travel up via the HTTP handshake; the state travels down via normal transport messages.
+For a reconnect after a brief connection drop, the client sends its local versions in step 4. The server only sends shards that changed during the disconnect — near-zero data if the disconnect was brief.
 
-For a reconnect after a brief connection drop, this means near-zero data — the client already has most shards at the current version. Only genuinely stale shards get a state push.
-
-If the client can't include shard versions in the handshake (too many shards, URL length limits), it sends an empty map and gets a full sync — graceful fallback to the same behavior as a first connection.
+On first connection, the client sends empty versions and receives full state for all subscribed shards.
 
 By default, the engine reads the actor's subscription shard to determine which shards to deliver. For consumers that need connection-specific logic (e.g., different subscriptions based on URL query params), the `subscriptionsOnConnect` hook overrides this:
 

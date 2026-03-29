@@ -1,11 +1,6 @@
 # Phase 3: Server Integration
 
-## Status: Steps 1-2 complete
-
-## Goal
-
-Wire pipeline + broadcast + state manager behind the consumer-facing `createServer()` API
-from VISION_v2.md Section 11.
+## Status: Steps 1-2 complete, items 3-6 are deferred refinements
 
 ## Steps
 
@@ -13,38 +8,15 @@ from VISION_v2.md Section 11.
 
 Composes pipeline + broadcast + state manager for one channel.
 State manager fires `onChange(shardId)` → broadcast manager's `onShardChanged()` for dirty tracking.
-ChannelEngine calls `broadcastPatches()` for autoBroadcast channels.
 
 ### 2. createServer ✅
 
-Consumer-facing entry point. Creates ChannelEngine per channel.
-Type-safe: channel names, operation names, and inputs enforced at compile time.
-Server-as-actor via `KIO_SERVER_ACTOR`.
+Consumer-facing entry point. Type-safe channel/operation names.
+Transport wiring, connection handshake, server-as-actor.
 
-### 3. VERSION_CONFLICT fresh state
+### Remaining refinements
 
-Rejection result includes current shard state from the CAS failure.
-Enables client-side `canRetry` to inspect state before resubmitting.
-
-### 4. Server-as-actor retry
-
-`server.submit()` accepts `{ maxRetries }` option.
-On VERSION_CONFLICT, reloads shards and retries up to maxRetries.
-
-### 5. Ephemeral versioning cleanup
-
-Ephemeral broadcast entries should not carry version numbers.
-Split BroadcastShardEntry into durable (with version) and ephemeral (without).
-
-### 6. broadcastMode: "full"
-
-When channel has `broadcastMode: "full"`, broadcast sends full state instead of patches.
-BroadcastManager checks the setting in `broadcastPatches`.
-
-## Not in this phase
-
-- Client-side ShardStore / reconciliation
-- Transport adapters (socket.io, websocket)
-- Persistence adapters (Prisma)
-- Connection lifecycle (authenticate, subscriptionsOnConnect)
-- Subscription shard
+3. **VERSION_CONFLICT fresh state** — rejection should include current shard state for canRetry
+4. **Server-as-actor retry** — maxRetries option on submit
+5. **Ephemeral versioning cleanup** — ephemeral entries should not carry version numbers
+6. **broadcastMode: "full"** — send full state instead of patches when configured
