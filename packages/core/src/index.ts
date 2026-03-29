@@ -35,3 +35,13 @@ export { createServer } from "./server";
 export type { ShardRef } from "./shard";
 export { shard } from "./shard";
 export type { PendingOperation, ShardState } from "./state";
+export type {
+	AcknowledgeMessage,
+	BroadcastServerMessage,
+	ClientMessage,
+	ClientTransport,
+	RejectMessage,
+	ServerMessage,
+	ServerTransport,
+	SubmitMessage,
+} from "./transport";
