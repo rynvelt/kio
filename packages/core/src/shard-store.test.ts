@@ -4,7 +4,7 @@ import { ShardStore } from "./shard-store";
 describe("ShardStore", () => {
 	describe("initial state", () => {
 		test("starts as unavailable", () => {
-			const store = new ShardStore<{ turn: number }>();
+			const store = new ShardStore<{ turn: number }>("durable");
 			const snap = store.snapshot;
 			expect(snap.syncStatus).toBe("unavailable");
 			expect(snap.state).toBeNull();
@@ -14,68 +14,213 @@ describe("ShardStore", () => {
 
 	describe("syncStatus transitions", () => {
 		test("unavailable → loading on grantAccess", () => {
-			const store = new ShardStore<{ turn: number }>();
+			const store = new ShardStore<{ turn: number }>("durable");
 			store.grantAccess();
 			expect(store.snapshot.syncStatus).toBe("loading");
 			expect(store.snapshot.state).toBeNull();
 		});
 
 		test("loading → latest on setState", () => {
-			const store = new ShardStore<{ turn: number }>();
+			const store = new ShardStore<{ turn: number }>("durable");
 			store.grantAccess();
-			store.setState({ turn: 0 }, 1);
+			store.applyBroadcastEntry({
+				shardId: "world",
+				version: 1,
+				state: { turn: 0 },
+			});
 			expect(store.snapshot.syncStatus).toBe("latest");
 			expect(store.snapshot.state).toEqual({ turn: 0 });
 		});
 
 		test("latest → unavailable on revokeAccess", () => {
-			const store = new ShardStore<{ turn: number }>();
+			const store = new ShardStore<{ turn: number }>("durable");
 			store.grantAccess();
-			store.setState({ turn: 0 }, 1);
+			store.applyBroadcastEntry({
+				shardId: "world",
+				version: 1,
+				state: { turn: 0 },
+			});
 			store.revokeAccess();
 			expect(store.snapshot.syncStatus).toBe("unavailable");
 			expect(store.snapshot.state).toBeNull();
 		});
 
-		test("latest → loading → latest (reconnect cycle)", () => {
-			const store = new ShardStore<{ turn: number }>();
+		test("reconnect cycle: latest → revoke → grant → loading → latest", () => {
+			const store = new ShardStore<{ turn: number }>("durable");
 			store.grantAccess();
-			store.setState({ turn: 0 }, 1);
+			store.applyBroadcastEntry({
+				shardId: "world",
+				version: 1,
+				state: { turn: 0 },
+			});
 
 			store.revokeAccess();
 			store.grantAccess();
 			expect(store.snapshot.syncStatus).toBe("loading");
 
-			store.setState({ turn: 5 }, 6);
+			store.applyBroadcastEntry({
+				shardId: "world",
+				version: 6,
+				state: { turn: 5 },
+			});
 			expect(store.snapshot.syncStatus).toBe("latest");
 			expect(store.snapshot.state).toEqual({ turn: 5 });
 		});
+	});
 
-		test("setState without grantAccess stays unavailable", () => {
-			const store = new ShardStore<{ turn: number }>();
-			store.setState({ turn: 0 }, 1);
-			expect(store.snapshot.syncStatus).toBe("unavailable");
+	describe("broadcast processing — full state", () => {
+		test("applies full state entry", () => {
+			const store = new ShardStore<{ turn: number }>("durable");
+			store.grantAccess();
+			store.applyBroadcastEntry({
+				shardId: "world",
+				version: 1,
+				state: { turn: 42 },
+			});
+			expect(store.snapshot.state).toEqual({ turn: 42 });
+			expect(store.version).toBe(1);
+		});
+
+		test("updates on newer version", () => {
+			const store = new ShardStore<{ turn: number }>("durable");
+			store.grantAccess();
+			store.applyBroadcastEntry({
+				shardId: "world",
+				version: 1,
+				state: { turn: 0 },
+			});
+			store.applyBroadcastEntry({
+				shardId: "world",
+				version: 2,
+				state: { turn: 1 },
+			});
+			expect(store.snapshot.state).toEqual({ turn: 1 });
+			expect(store.version).toBe(2);
+		});
+	});
+
+	describe("broadcast processing — patches", () => {
+		test("applies patches to existing state", () => {
+			const store = new ShardStore<{ turn: number; stage: string }>("durable");
+			store.grantAccess();
+			store.applyBroadcastEntry({
+				shardId: "world",
+				version: 1,
+				state: { turn: 0, stage: "PLAYING" },
+			});
+			store.applyBroadcastEntry({
+				shardId: "world",
+				version: 2,
+				patches: [{ op: "replace", path: ["turn"], value: 1 }],
+			});
+			expect(store.snapshot.state).toEqual({ turn: 1, stage: "PLAYING" });
+			expect(store.version).toBe(2);
+		});
+
+		test("ignores patches without existing state", () => {
+			const store = new ShardStore<{ turn: number }>("durable");
+			store.grantAccess();
+
+			let notified = false;
+			store.subscribe(() => {
+				notified = true;
+			});
+
+			store.applyBroadcastEntry({
+				shardId: "world",
+				version: 1,
+				patches: [{ op: "replace", path: ["turn"], value: 1 }],
+			});
+
+			expect(store.snapshot.syncStatus).toBe("loading");
+			expect(notified).toBe(false);
+		});
+	});
+
+	describe("broadcast processing — durable version check", () => {
+		test("ignores stale broadcast (same version)", () => {
+			const store = new ShardStore<{ turn: number }>("durable");
+			store.grantAccess();
+			store.applyBroadcastEntry({
+				shardId: "world",
+				version: 5,
+				state: { turn: 10 },
+			});
+
+			let notified = false;
+			store.subscribe(() => {
+				notified = true;
+			});
+
+			store.applyBroadcastEntry({
+				shardId: "world",
+				version: 5,
+				state: { turn: 99 },
+			});
+
+			expect(store.snapshot.state).toEqual({ turn: 10 });
+			expect(notified).toBe(false);
+		});
+
+		test("ignores stale broadcast (older version)", () => {
+			const store = new ShardStore<{ turn: number }>("durable");
+			store.grantAccess();
+			store.applyBroadcastEntry({
+				shardId: "world",
+				version: 5,
+				state: { turn: 10 },
+			});
+
+			store.applyBroadcastEntry({
+				shardId: "world",
+				version: 3,
+				state: { turn: 0 },
+			});
+
+			expect(store.snapshot.state).toEqual({ turn: 10 });
+			expect(store.version).toBe(5);
+		});
+	});
+
+	describe("broadcast processing — ephemeral (no version check)", () => {
+		test("always accepts, even with lower version", () => {
+			const store = new ShardStore<{ lat: number }>("ephemeral");
+			store.grantAccess();
+			store.applyBroadcastEntry({
+				shardId: "player:alice",
+				version: 5,
+				state: { lat: 48.8 },
+			});
+			store.applyBroadcastEntry({
+				shardId: "player:alice",
+				version: 3,
+				state: { lat: 52.5 },
+			});
+
+			expect(store.snapshot.state).toEqual({ lat: 52.5 });
+			expect(store.version).toBe(3);
 		});
 	});
 
 	describe("subscriber notification", () => {
-		test("notifies on setState", () => {
-			const store = new ShardStore<{ turn: number }>();
+		test("notifies on broadcast entry", () => {
+			const store = new ShardStore<{ turn: number }>("durable");
 			store.grantAccess();
 			let callCount = 0;
 			store.subscribe(() => {
 				callCount += 1;
 			});
 
-			store.setState({ turn: 0 }, 1);
+			store.applyBroadcastEntry({
+				shardId: "world",
+				version: 1,
+				state: { turn: 0 },
+			});
 			expect(callCount).toBe(1);
-
-			store.setState({ turn: 1 }, 2);
-			expect(callCount).toBe(2);
 		});
 
 		test("notifies on grantAccess", () => {
-			const store = new ShardStore<{ turn: number }>();
+			const store = new ShardStore<{ turn: number }>("durable");
 			let callCount = 0;
 			store.subscribe(() => {
 				callCount += 1;
@@ -86,9 +231,13 @@ describe("ShardStore", () => {
 		});
 
 		test("notifies on revokeAccess", () => {
-			const store = new ShardStore<{ turn: number }>();
+			const store = new ShardStore<{ turn: number }>("durable");
 			store.grantAccess();
-			store.setState({ turn: 0 }, 1);
+			store.applyBroadcastEntry({
+				shardId: "world",
+				version: 1,
+				state: { turn: 0 },
+			});
 
 			let callCount = 0;
 			store.subscribe(() => {
@@ -100,40 +249,53 @@ describe("ShardStore", () => {
 		});
 
 		test("does not notify after unsubscribe", () => {
-			const store = new ShardStore<{ turn: number }>();
+			const store = new ShardStore<{ turn: number }>("durable");
 			store.grantAccess();
 			let callCount = 0;
 			const unsub = store.subscribe(() => {
 				callCount += 1;
 			});
 
-			store.setState({ turn: 0 }, 1);
+			store.applyBroadcastEntry({
+				shardId: "world",
+				version: 1,
+				state: { turn: 0 },
+			});
 			expect(callCount).toBe(1);
 
 			unsub();
-			store.setState({ turn: 1 }, 2);
+			store.applyBroadcastEntry({
+				shardId: "world",
+				version: 2,
+				state: { turn: 1 },
+			});
 			expect(callCount).toBe(1);
 		});
 
-		test("multiple subscribers all notified", () => {
-			const store = new ShardStore<{ turn: number }>();
+		test("does not notify on stale durable broadcast", () => {
+			const store = new ShardStore<{ turn: number }>("durable");
 			store.grantAccess();
-			let count1 = 0;
-			let count2 = 0;
-			store.subscribe(() => {
-				count1 += 1;
-			});
-			store.subscribe(() => {
-				count2 += 1;
+			store.applyBroadcastEntry({
+				shardId: "world",
+				version: 5,
+				state: { turn: 10 },
 			});
 
-			store.setState({ turn: 0 }, 1);
-			expect(count1).toBe(1);
-			expect(count2).toBe(1);
+			let callCount = 0;
+			store.subscribe(() => {
+				callCount += 1;
+			});
+
+			store.applyBroadcastEntry({
+				shardId: "world",
+				version: 3,
+				state: { turn: 0 },
+			});
+			expect(callCount).toBe(0);
 		});
 
 		test("no duplicate notification on redundant grantAccess", () => {
-			const store = new ShardStore<{ turn: number }>();
+			const store = new ShardStore<{ turn: number }>("durable");
 			store.grantAccess();
 
 			let callCount = 0;
@@ -146,7 +308,7 @@ describe("ShardStore", () => {
 		});
 
 		test("no duplicate notification on redundant revokeAccess", () => {
-			const store = new ShardStore<{ turn: number }>();
+			const store = new ShardStore<{ turn: number }>("durable");
 			let callCount = 0;
 			store.subscribe(() => {
 				callCount += 1;
@@ -159,23 +321,28 @@ describe("ShardStore", () => {
 
 	describe("version tracking", () => {
 		test("version is null initially", () => {
-			const store = new ShardStore<{ turn: number }>();
+			const store = new ShardStore<{ turn: number }>("durable");
 			expect(store.version).toBeNull();
 		});
 
 		test("version tracks received state", () => {
-			const store = new ShardStore<{ turn: number }>();
-			store.setState({ turn: 0 }, 5);
+			const store = new ShardStore<{ turn: number }>("durable");
+			store.applyBroadcastEntry({
+				shardId: "world",
+				version: 5,
+				state: { turn: 0 },
+			});
 			expect(store.version).toBe(5);
-
-			store.setState({ turn: 1 }, 6);
-			expect(store.version).toBe(6);
 		});
 
 		test("version resets on revokeAccess", () => {
-			const store = new ShardStore<{ turn: number }>();
+			const store = new ShardStore<{ turn: number }>("durable");
 			store.grantAccess();
-			store.setState({ turn: 0 }, 5);
+			store.applyBroadcastEntry({
+				shardId: "world",
+				version: 5,
+				state: { turn: 0 },
+			});
 			store.revokeAccess();
 			expect(store.version).toBeNull();
 		});

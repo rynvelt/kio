@@ -1,4 +1,9 @@
+import { applyPatches, enableMapSet, enablePatches } from "immer";
+import type { BroadcastShardEntry } from "./broadcast";
 import type { ShardState } from "./state";
+
+enablePatches();
+enableMapSet();
 
 type Listener = () => void;
 
@@ -11,11 +16,13 @@ type Listener = () => void;
  * - loading: access granted, waiting for first state from server
  * - latest: has current state from server
  */
-export class ShardStore<T> {
+export class ShardStore<T extends Record<string, unknown>> {
 	/** State received from the server's last broadcast. null until first broadcast arrives. */
 	private received: { state: T; version: number } | null = null;
 	private accessGranted = false;
 	private listeners = new Set<Listener>();
+
+	constructor(private readonly kind: "durable" | "ephemeral") {}
 
 	/** Consumer-facing snapshot — derived from received state + access. */
 	get snapshot(): ShardState<T> {
@@ -32,6 +39,38 @@ export class ShardStore<T> {
 		};
 	}
 
+	/**
+	 * Apply a broadcast entry from the server.
+	 * Handles full state and patch entries.
+	 * Durable shards ignore stale broadcasts (version <= current).
+	 */
+	applyBroadcastEntry(entry: BroadcastShardEntry): void {
+		if (
+			this.kind === "durable" &&
+			this.received &&
+			entry.version <= this.received.version
+		) {
+			return;
+		}
+
+		if ("state" in entry) {
+			this.received = {
+				state: entry.state as T,
+				version: entry.version,
+			};
+		} else if (this.received) {
+			this.received = {
+				state: applyPatches(this.received.state, entry.patches) as T,
+				version: entry.version,
+			};
+		} else {
+			// Patches without existing state — can't apply. Ignore.
+			return;
+		}
+
+		this.notify();
+	}
+
 	/** Grant access — transitions from unavailable to loading */
 	grantAccess(): void {
 		if (this.accessGranted) return;
@@ -44,12 +83,6 @@ export class ShardStore<T> {
 		if (!this.accessGranted) return;
 		this.accessGranted = false;
 		this.received = null;
-		this.notify();
-	}
-
-	/** Set state from a server broadcast */
-	setState(state: T, version: number): void {
-		this.received = { state, version };
 		this.notify();
 	}
 
