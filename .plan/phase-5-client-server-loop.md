@@ -1,5 +1,7 @@
 # Phase 5: Client-Server Loop
 
+## Status: Steps 1-3 complete, step 4 needs connection handshake first
+
 ## Goal
 
 End-to-end: client submits operation → server processes → broadcast → client ShardStore updates.
@@ -7,8 +9,7 @@ Using a direct-call transport (typed messages, no serialization, no network).
 
 ## Architecture
 
-See VISION_v2.md Section 6 for the full transport spec.
-This phase implements a minimal subset — typed messages, no bytes, no codec, no connection lifecycle.
+See VISION_v2.md Section 6 for the full transport/connection spec.
 
 ```
 createClient(clientEngine, { transport })
@@ -16,62 +17,71 @@ createClient(clientEngine, { transport })
 
 DirectTransport (passes typed messages in-process)
 
-createServer(serverEngine, { transport, persistence }) [exists, needs transport wiring]
+createServer(serverEngine, { transport, persistence }) [exists, transport wired]
   └─ ChannelEngine (per channel) [exists]
 ```
 
-## Message types (engine-level, not wire-level)
+## Connection handshake (from vision doc Section 6)
 
 ```
-Client → Server:
-  { type: "submit", channelId, operationName, input, opId }
-
-Server → Client:
-  { type: "broadcast", channelId, kind, shards }
-  { type: "acknowledge", opId }
-  { type: "reject", opId, code, message }
+1. Client connects with intent + local shard versions (empty on first connect)
+2. Server authenticates
+3. Server determines subscriptions (from subscription shard or defaultSubscriptions hook)
+4. Server sends manifest: { shardId: serverVersion, ... }
+5. Server sends broadcast for each stale shard (full state)
+6. Server sends "ready"
 ```
+
+The client doesn't decide which shards to subscribe to — the server tells it.
+ShardStores are created after the server confirms subscriptions.
 
 ## Steps
 
-### 1. Message types + transport interface
+### 1. Message types + transport interface ✅
 
-Define engine-level message types (ClientMessage, ServerMessage).
-Define transport interface: send() + onMessage() — typed messages, not bytes.
-Both client-side and server-side interfaces.
+### 2. DirectTransport ✅
 
-### 2. DirectTransport
+### 3. Wire server to transport ✅
 
-In-process implementation. Connects a client and server transport pair.
-send() on one side calls onMessage() on the other synchronously.
+Server receives submit via transport, routes to ChannelEngine.
+Sends acknowledge/reject/broadcast back.
 
-### 3. Wire server to transport
+### 4. Connection handshake messages
 
-Server receives ClientMessage via transport → routes to correct ChannelEngine.
-ChannelEngine result → server sends acknowledge/reject via transport.
-ChannelEngine broadcast → server sends broadcast via transport.
-This replaces the current Subscriber interface as the delivery mechanism.
+Add to message types:
+- Client → Server: `{ type: "connect", shardVersions }` (intent handled by transport/query)
+- Server → Client: `{ type: "manifest", versions }`
+- Server → Client: broadcasts for stale shards (uses existing broadcast message)
+- Server → Client: `{ type: "ready" }`
 
-### 4. ClientChannelEngine
+For the DirectTransport: connect is synchronous — client calls connect(),
+server determines subscriptions, sends manifest + state + ready, all in one call.
 
-Per-channel client-side engine. Owns ShardStores.
-- Takes subscribed shard IDs (explicit for now, subscription shard later)
-- Creates ShardStore per shard
-- Routes incoming BroadcastMessage → correct ShardStore.applyBroadcastEntry()
-- submit() → sends ClientMessage through transport
+### 5. Server connection handling
 
-### 5. createClient
+Server receives connect message → runs defaultSubscriptions → determines shards →
+registers transport subscriber → sends manifest + initial state + ready.
+Simplified: no authenticate for now (DirectTransport has no auth).
 
-Consumer-facing entry point. Takes clientEngine + transport.
-- Creates ClientChannelEngine per channel
-- Wires transport onMessage → routes to correct ClientChannelEngine
-- Exposes typed API: client.channel("game").submit(...), client.channel("game").shardState(...)
+### 6. ClientChannelEngine
 
-### 6. End-to-end test
+Creates ShardStores in response to server messages, not client decisions:
+- Receives manifest → creates stores in "loading" state
+- Receives broadcasts → routes to stores, transitions to "latest"
+- Receives ready → connection is established
+- submit() → sends via transport, returns SubmitResult
 
-createClient + createServer + DirectTransport.
-- Client subscribes to shards
-- Client submits operation
-- Server applies, persists, broadcasts
-- Client ShardStore reflects new state
-- Test for both durable and ephemeral channels
+### 7. createClient
+
+Consumer-facing entry point. Creates ClientChannelEngine per channel.
+Wires transport onMessage → routes to correct ClientChannelEngine.
+Exposes: client.channel("game").submit(...), client.channel("game").shardState(...)
+Initiates connection handshake on creation.
+
+### 8. End-to-end test
+
+Full loop with correct handshake:
+- createClient + createServer + DirectTransport
+- Server determines subscriptions, sends initial state
+- Client ShardStores created and populated
+- Client submits operation → server applies → broadcast → client updates
