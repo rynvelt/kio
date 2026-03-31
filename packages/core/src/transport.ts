@@ -56,6 +56,12 @@ export interface RejectMessage {
 	readonly opId: string;
 	readonly code: string;
 	readonly message: string;
+	/** Fresh shard state — included for VERSION_CONFLICT so clients can evaluate canRetry */
+	readonly shards?: ReadonlyArray<{
+		readonly shardId: string;
+		readonly version: number;
+		readonly state: unknown;
+	}>;
 }
 
 export type ServerMessage =

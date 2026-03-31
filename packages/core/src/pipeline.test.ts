@@ -8,6 +8,12 @@ import {
 	OperationPipeline,
 } from "./pipeline";
 import { ShardStateManager } from "./shard-state-manager";
+import { expectToBeDefined } from "./test-helpers";
+
+let opCounter = 0;
+function nextOpId(): string {
+	return `test:${String(opCounter++)}`;
+}
 
 function setupGame() {
 	const ch = channel
@@ -114,6 +120,7 @@ describe("OperationPipeline", () => {
 				operationName: "advanceTurn",
 				input: {},
 				actor,
+				opId: nextOpId(),
 			});
 
 			expect(result.status).toBe("acknowledged");
@@ -135,6 +142,7 @@ describe("OperationPipeline", () => {
 				operationName: "useItem",
 				input: { seatId: "1", itemId: "nonexistent" },
 				actor,
+				opId: nextOpId(),
 			});
 
 			expect(result.status).toBe("rejected");
@@ -157,6 +165,7 @@ describe("OperationPipeline", () => {
 				operationName: "useItem",
 				input: { seatId: "1", itemId: "sword" },
 				actor,
+				opId: nextOpId(),
 			});
 
 			expect(result.status).toBe("acknowledged");
@@ -178,6 +187,7 @@ describe("OperationPipeline", () => {
 				operationName: "rollDice",
 				input: { max: 6 },
 				actor,
+				opId: nextOpId(),
 			});
 
 			expect(result.status).toBe("acknowledged");
@@ -199,6 +209,7 @@ describe("OperationPipeline", () => {
 				operationName: "chooseOption",
 				input: { seatId: "1", option: "explore" },
 				actor,
+				opId: nextOpId(),
 			});
 
 			expect(result.status).toBe("acknowledged");
@@ -221,6 +232,7 @@ describe("OperationPipeline", () => {
 				operationName: "useItem",
 				input: { seatId: 123 },
 				actor,
+				opId: nextOpId(),
 			});
 
 			expect(result.status).toBe("rejected");
@@ -243,6 +255,7 @@ describe("OperationPipeline", () => {
 				operationName: "advanceTurn",
 				input: {},
 				actor,
+				opId: nextOpId(),
 			});
 
 			expect(result.status).toBe("rejected");
@@ -295,6 +308,7 @@ describe("OperationPipeline", () => {
 				operationName: "advanceTurn",
 				input: {},
 				actor,
+				opId: nextOpId(),
 			});
 
 			// External write conflicts with cached version
@@ -307,11 +321,19 @@ describe("OperationPipeline", () => {
 				operationName: "advanceTurn",
 				input: {},
 				actor,
+				opId: nextOpId(),
 			});
 
 			expect(result.status).toBe("rejected");
 			if (result.status === "rejected") {
 				expect(result.code).toBe("VERSION_CONFLICT");
+				expectToBeDefined(result.shards);
+				expect(result.shards).toHaveLength(1);
+				const shard = result.shards[0];
+				expectToBeDefined(shard);
+				expect(shard.shardId).toBe("world");
+				expect(shard.version).toBe(3);
+				expect((shard.state as { turn: number }).turn).toBe(99);
 			}
 		});
 	});
@@ -325,6 +347,7 @@ describe("OperationPipeline", () => {
 				operationName: "doesNotExist",
 				input: {},
 				actor,
+				opId: nextOpId(),
 			});
 
 			expect(result.status).toBe("rejected");
@@ -370,6 +393,7 @@ describe("OperationPipeline", () => {
 				operationName: "setStatus",
 				input: { status: "busy" },
 				actor,
+				opId: nextOpId(),
 			});
 
 			// External modification
@@ -380,6 +404,7 @@ describe("OperationPipeline", () => {
 				operationName: "setStatus",
 				input: { status: "away" },
 				actor,
+				opId: nextOpId(),
 			});
 
 			expect(result.status).toBe("acknowledged");
@@ -435,6 +460,7 @@ describe("OperationPipeline", () => {
 				operationName: "updateGps",
 				input: { playerId: "alice", lat: 48.8, lng: 2.3 },
 				actor,
+				opId: nextOpId(),
 			});
 
 			expect(result.status).toBe("acknowledged");
@@ -477,6 +503,7 @@ describe("OperationPipeline", () => {
 				operationName: "crashingOp",
 				input: {},
 				actor: { actorId: "alice" },
+				opId: nextOpId(),
 			});
 
 			expect(result.status).toBe("rejected");
@@ -515,6 +542,7 @@ describe("OperationPipeline", () => {
 				operationName: "crashingCompute",
 				input: {},
 				actor: { actorId: "alice" },
+				opId: nextOpId(),
 			});
 
 			expect(result.status).toBe("rejected");

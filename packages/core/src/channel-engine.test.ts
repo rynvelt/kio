@@ -4,6 +4,7 @@ import type { BroadcastMessage, Subscriber } from "./broadcast";
 import { ChannelEngine } from "./channel-engine";
 import { channel, shard } from "./index";
 import { MemoryStateAdapter } from "./persistence";
+import { expectToBeDefined } from "./test-helpers";
 
 function createSubscriber(
 	id: string,
@@ -73,6 +74,11 @@ function setupEphemeralPresence() {
 
 const actor = { actorId: "player:alice" };
 
+let opCounter = 0;
+function nextOpId(): string {
+	return `test:${String(opCounter++)}`;
+}
+
 describe("ChannelEngine — durable, autoBroadcast: true", () => {
 	test("submit changes state and broadcasts patches", async () => {
 		const { engine, adapter } = setupDurableGame();
@@ -88,6 +94,7 @@ describe("ChannelEngine — durable, autoBroadcast: true", () => {
 			operationName: "advanceTurn",
 			input: {},
 			actor,
+			opId: nextOpId(),
 		});
 
 		expect(result.status).toBe("acknowledged");
@@ -102,6 +109,14 @@ describe("ChannelEngine — durable, autoBroadcast: true", () => {
 		expect(sub.messages[0]?.kind).toBe("durable");
 		expect(sub.messages[0]?.shards).toHaveLength(1);
 		expect(sub.messages[0]?.shards[0]?.shardId).toBe("world");
+
+		// causedBy includes opId
+		const entry = sub.messages[0]?.shards[0];
+		expectToBeDefined(entry);
+		expectToBeDefined(entry.causedBy);
+		expect(entry.causedBy.opId).toBeDefined();
+		expect(entry.causedBy.operation).toBe("advanceTurn");
+		expect(entry.causedBy.actor).toBe("player:alice");
 	});
 
 	test("failed submission does not broadcast", async () => {
@@ -114,6 +129,7 @@ describe("ChannelEngine — durable, autoBroadcast: true", () => {
 			operationName: "advanceTurn",
 			input: "invalid",
 			actor,
+			opId: nextOpId(),
 		});
 
 		expect(result.status).toBe("rejected");
@@ -139,6 +155,7 @@ describe("ChannelEngine — durable, autoBroadcast: true", () => {
 			operationName: "advanceTurn",
 			input: {},
 			actor,
+			opId: nextOpId(),
 		});
 
 		expect(worldSub.messages).toHaveLength(1);
@@ -148,6 +165,7 @@ describe("ChannelEngine — durable, autoBroadcast: true", () => {
 			operationName: "addItem",
 			input: { seatId: "1", item: "sword" },
 			actor,
+			opId: nextOpId(),
 		});
 
 		expect(worldSub.messages).toHaveLength(1);
@@ -169,6 +187,7 @@ describe("ChannelEngine — durable, autoBroadcast: true", () => {
 			operationName: "advanceTurn",
 			input: {},
 			actor,
+			opId: nextOpId(),
 		});
 		expect(sub.messages).toHaveLength(1);
 
@@ -178,6 +197,7 @@ describe("ChannelEngine — durable, autoBroadcast: true", () => {
 			operationName: "advanceTurn",
 			input: {},
 			actor,
+			opId: nextOpId(),
 		});
 		expect(sub.messages).toHaveLength(1);
 	});
@@ -197,6 +217,7 @@ describe("ChannelEngine — ephemeral, autoBroadcast: false", () => {
 			operationName: "updateGps",
 			input: { playerId: "alice", lat: 48.8, lng: 2.3 },
 			actor,
+			opId: nextOpId(),
 		});
 
 		// autoBroadcast: false — nothing sent yet
@@ -224,16 +245,19 @@ describe("ChannelEngine — ephemeral, autoBroadcast: false", () => {
 			operationName: "updateGps",
 			input: { playerId: "alice", lat: 1, lng: 1 },
 			actor,
+			opId: nextOpId(),
 		});
 		await engine.submit({
 			operationName: "updateGps",
 			input: { playerId: "alice", lat: 2, lng: 2 },
 			actor,
+			opId: nextOpId(),
 		});
 		await engine.submit({
 			operationName: "updateGps",
 			input: { playerId: "alice", lat: 3, lng: 3 },
 			actor,
+			opId: nextOpId(),
 		});
 
 		engine.broadcastDirtyShards();
@@ -257,11 +281,13 @@ describe("ChannelEngine — ephemeral, autoBroadcast: false", () => {
 			operationName: "updateGps",
 			input: { playerId: "alice", lat: 1, lng: 1 },
 			actor,
+			opId: nextOpId(),
 		});
 		await engine.submit({
 			operationName: "updateGps",
 			input: { playerId: "carol", lat: 2, lng: 2 },
 			actor: { actorId: "player:carol" },
+			opId: nextOpId(),
 		});
 
 		engine.broadcastDirtyShards(["player:alice"]);

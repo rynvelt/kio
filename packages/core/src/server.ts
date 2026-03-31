@@ -263,19 +263,24 @@ export function createServer<TChannels extends object>(
 						opId: message.opId,
 						code: result.code,
 						message: result.message,
+						shards: result.shards,
 					});
 				}
 			}
 		});
 	}
 
+	let serverOpCounter = 0;
+
 	return {
 		async submit(channelName, operationName, input) {
 			const ch = getChannelOrThrow(channelName);
+			const opId = `server:${String(serverOpCounter++)}`;
 			return ch.submit({
 				operationName,
 				input,
 				actor: KIO_SERVER_ACTOR,
+				opId,
 			});
 		},
 

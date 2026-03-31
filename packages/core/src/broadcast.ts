@@ -2,6 +2,7 @@ import type { Patch } from "immer";
 
 /** Metadata about what caused the state change */
 export interface CausedBy {
+	readonly opId: string;
 	readonly operation: string;
 	readonly actor: string;
 }

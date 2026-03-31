@@ -64,6 +64,7 @@ export class ChannelEngine {
 
 		if (result.status === "acknowledged" && this.autoBroadcast) {
 			const causedBy: CausedBy = {
+				opId: result.opId,
 				operation: result.operationName,
 				actor: submission.actor.actorId,
 			};

@@ -21,7 +21,11 @@ function createSubscriber(
 }
 
 const testPatches: Patch[] = [{ op: "replace", path: ["turn"], value: 1 }];
-const testCausedBy = { operation: "advanceTurn", actor: "player:alice" };
+const testCausedBy = {
+	opId: "game:0",
+	operation: "advanceTurn",
+	actor: "player:alice",
+};
 
 function broadcastPatches(
 	mgr: BroadcastManager,
@@ -84,6 +88,7 @@ describe("BroadcastManager — broadcastPatches", () => {
 
 		const entry = sub.messages[0]?.shards[0];
 		expectToBeDefined(entry);
+		expect(entry.causedBy?.opId).toBe("game:0");
 		expect(entry.causedBy?.operation).toBe("advanceTurn");
 		expect(entry.causedBy?.actor).toBe("player:alice");
 	});

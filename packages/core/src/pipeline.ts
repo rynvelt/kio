@@ -18,13 +18,14 @@ export interface Submission {
 	readonly operationName: string;
 	readonly input: unknown;
 	readonly actor: Actor;
-	readonly opId?: string;
+	readonly opId: string;
 }
 
 /** Pipeline result — mirrors SubmitResult but with patches for broadcasting */
 export type PipelineResult =
 	| {
 			readonly status: "acknowledged";
+			readonly opId: string;
 			readonly operationName: string;
 			readonly shardVersions: ReadonlyMap<string, number>;
 			readonly patchesByShard: ReadonlyMap<string, readonly Patch[]>;
@@ -33,6 +34,12 @@ export type PipelineResult =
 			readonly status: "rejected";
 			readonly code: string;
 			readonly message: string;
+			/** Fresh shard state — included for VERSION_CONFLICT rejections */
+			readonly shards?: ReadonlyArray<{
+				readonly shardId: string;
+				readonly version: number;
+				readonly state: unknown;
+			}>;
 	  };
 
 /** Rejection error thrown by validate's reject() callback */
@@ -96,7 +103,7 @@ export class OperationPipeline {
 		}
 
 		// 1. Deduplication
-		if (opDef.deduplicate && opId) {
+		if (opDef.deduplicate) {
 			if (this.config.deduplication?.has(opId)) {
 				return {
 					status: "rejected",
@@ -229,10 +236,23 @@ export class OperationPipeline {
 				);
 
 				if (!persistResult.success) {
+					// Reload fresh state for dirty shards so clients can evaluate canRetry
+					const freshShards = await this.stateManager.loadShards(
+						scopeRefs.filter((ref) => dirtyShardIds.includes(ref.shardId)),
+					);
+					const shards = [...freshShards.entries()].map(
+						([shardId, cached]) => ({
+							shardId,
+							version: cached.version,
+							state: cached.state,
+						}),
+					);
+
 					return {
 						status: "rejected",
 						code: "VERSION_CONFLICT",
 						message: `Version conflict on shard "${persistResult.failedShardId}"`,
+						shards,
 					};
 				}
 				versions = persistResult.versions;
@@ -245,12 +265,13 @@ export class OperationPipeline {
 				versions = result.versions;
 			}
 
-			if (opDef.deduplicate && opId) {
+			if (opDef.deduplicate) {
 				this.config.deduplication?.add(opId);
 			}
 
 			return {
 				status: "acknowledged",
+				opId,
 				operationName,
 				shardVersions: versions,
 				patchesByShard,
@@ -267,12 +288,13 @@ export class OperationPipeline {
 			ephemeralVersions.set(shardId, newVersion);
 		}
 
-		if (opDef.deduplicate && opId) {
+		if (opDef.deduplicate) {
 			this.config.deduplication?.add(opId);
 		}
 
 		return {
 			status: "acknowledged",
+			opId,
 			operationName,
 			shardVersions: ephemeralVersions,
 			patchesByShard,
