@@ -1,14 +1,12 @@
 import type { BroadcastShardEntry } from "./broadcast";
 
-// ── Bidirectional messages ───────────────────────────────────────────
+// ── Client → Server messages ─────────────────────────────────────────
 
-/** Both client and server send their shard versions during connection handshake */
+/** Client responds to welcome with its local shard versions */
 export interface VersionsMessage {
 	readonly type: "versions";
 	readonly shards: Record<string, number>;
 }
-
-// ── Client → Server messages ─────────────────────────────────────────
 
 /** Client submits an operation */
 export interface SubmitMessage {
@@ -22,6 +20,13 @@ export interface SubmitMessage {
 export type ClientMessage = VersionsMessage | SubmitMessage;
 
 // ── Server → Client messages ─────────────────────────────────────────
+
+/** Server sends welcome on connect — actor identity + server shard versions */
+export interface WelcomeMessage {
+	readonly type: "welcome";
+	readonly actorId: string;
+	readonly shards: Record<string, number>;
+}
 
 /** Server sends shard state to a specific client (initial sync after handshake) */
 export interface StateMessage {
@@ -65,7 +70,7 @@ export interface RejectMessage {
 }
 
 export type ServerMessage =
-	| VersionsMessage
+	| WelcomeMessage
 	| StateMessage
 	| BroadcastServerMessage
 	| ReadyMessage

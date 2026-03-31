@@ -1,10 +1,11 @@
 import { produce } from "immer";
 import type { ChannelData, OperationDefinition } from "./channel";
+import type { SubmitResult } from "./result";
 import { buildShardAccessors } from "./shard-accessors";
+import type { InFlight } from "./shard-store";
 import { ShardStore } from "./shard-store";
 import type { ShardState } from "./state";
 import type {
-	AcknowledgeMessage,
 	BroadcastServerMessage,
 	ClientTransport,
 	RejectMessage,
@@ -12,7 +13,7 @@ import type {
 } from "./transport";
 
 type PendingSubmit = {
-	resolve: (result: AcknowledgeMessage | RejectMessage) => void;
+	resolve: (result: SubmitResult) => void;
 };
 
 /**
@@ -31,12 +32,21 @@ export class ClientChannelEngine {
 	private readonly pendingSubmits = new Map<string, PendingSubmit>();
 	/** Maps opId → shardId for in-flight optimistic operations */
 	private readonly inFlightShards = new Map<string, string>();
+	/** Maps opId → timeout timer for submit timeout */
+	private readonly timeouts = new Map<string, ReturnType<typeof setTimeout>>();
 	private opCounter = 0;
+	private actorId = "";
 
 	constructor(
 		private readonly channelData: ChannelData,
 		private readonly transport: ClientTransport,
+		private readonly submitTimeoutMs: number = 10_000,
 	) {}
+
+	/** Set the actor ID — called when the server sends the welcome message */
+	setActorId(actorId: string): void {
+		this.actorId = actorId;
+	}
 
 	/**
 	 * Handle a state message from the server (initial sync during handshake).
@@ -70,22 +80,60 @@ export class ClientChannelEngine {
 
 	/**
 	 * Handle acknowledge or reject for a pending submit.
-	 * Clears the in-flight slot on the affected shard.
+	 * On acknowledge: clears in-flight, resolves with acknowledged.
+	 * On VERSION_CONFLICT: applies fresh state, runs canRetry, may resubmit.
+	 * On other reject: clears in-flight, resolves with rejected.
 	 */
-	handleSubmitResponse(message: AcknowledgeMessage | RejectMessage): void {
+	handleSubmitResponse(
+		message: RejectMessage | { type: "acknowledge"; opId: string },
+	): void {
 		const pending = this.pendingSubmits.get(message.opId);
-		if (pending) {
+		if (!pending) return;
+
+		this.clearTimer(message.opId);
+
+		if (message.type === "acknowledge") {
 			this.pendingSubmits.delete(message.opId);
-
-			// Clear in-flight on the affected shard store
-			const shardId = this.inFlightShards.get(message.opId);
-			if (shardId) {
-				this.inFlightShards.delete(message.opId);
-				this.stores.get(shardId)?.clearInFlight();
-			}
-
-			pending.resolve(message);
+			this.clearInFlightForOp(message.opId);
+			pending.resolve({ status: "acknowledged" });
+			return;
 		}
+
+		// Apply fresh shard state from VERSION_CONFLICT rejection
+		if (message.shards) {
+			for (const entry of message.shards) {
+				const store = this.stores.get(entry.shardId);
+				store?.applyBroadcastEntry({
+					shardId: entry.shardId,
+					version: entry.version,
+					state: entry.state,
+				});
+			}
+		}
+
+		// Try canRetry for VERSION_CONFLICT
+		if (message.code === "VERSION_CONFLICT") {
+			const retried = this.tryRetry(message.opId);
+			if (retried) return;
+		}
+
+		// No retry — resolve as rejected
+		this.pendingSubmits.delete(message.opId);
+		this.clearInFlightForOp(message.opId);
+		pending.resolve({
+			status: "rejected",
+			error: { code: message.code, message: message.message },
+		});
+	}
+
+	/** Handle disconnect — clear all in-flight operations and resolve pending submits */
+	handleDisconnect(): void {
+		for (const [opId, pending] of this.pendingSubmits) {
+			this.clearTimer(opId);
+			this.clearInFlightForOp(opId);
+			pending.resolve({ status: "disconnected" });
+		}
+		this.pendingSubmits.clear();
 	}
 
 	/** Get the ShardState snapshot for a shard */
@@ -105,18 +153,16 @@ export class ClientChannelEngine {
 	}
 
 	/**
-	 * Submit an operation via the transport. Returns when server responds.
+	 * Submit an operation via the transport.
 	 *
 	 * For optimistic operations: resolves scope, checks in-flight slot,
 	 * runs apply() to compute prediction, sets in-flight + prediction
 	 * on the target ShardStore, then sends to server.
+	 *
+	 * Returns a SubmitResult — never throws.
 	 */
-	async submit(
-		operationName: string,
-		input: unknown,
-	): Promise<AcknowledgeMessage | RejectMessage> {
+	async submit(operationName: string, input: unknown): Promise<SubmitResult> {
 		const opId = `${this.channelData.name}:${String(this.opCounter++)}`;
-
 		const opDef = this.channelData.operations.get(operationName);
 
 		// Optimistic apply — predict locally before sending to server
@@ -125,11 +171,25 @@ export class ClientChannelEngine {
 			if (blocked) return blocked;
 		}
 
-		const promise = new Promise<AcknowledgeMessage | RejectMessage>(
-			(resolve) => {
-				this.pendingSubmits.set(opId, { resolve });
-			},
-		);
+		return this.sendAndAwait(opId, operationName, input);
+	}
+
+	get name(): string {
+		return this.channelData.name;
+	}
+
+	// ── Private ─────────────────────────────────────────────────────────
+
+	private sendAndAwait(
+		opId: string,
+		operationName: string,
+		input: unknown,
+	): Promise<SubmitResult> {
+		const promise = new Promise<SubmitResult>((resolve) => {
+			this.pendingSubmits.set(opId, { resolve });
+		});
+
+		this.startTimer(opId);
 
 		this.transport.send({
 			type: "submit",
@@ -144,22 +204,17 @@ export class ClientChannelEngine {
 
 	/**
 	 * Run optimistic apply: resolve scope, check in-flight, compute prediction.
-	 * Returns a RejectMessage if blocked (in-flight slot occupied), null otherwise.
+	 * Returns a blocked SubmitResult if in-flight slot is occupied, null otherwise.
 	 */
 	private applyOptimistic(
 		opDef: OperationDefinition,
 		input: unknown,
 		opId: string,
 		operationName: string,
-	): RejectMessage | null {
-		// Resolve scope to find target shard
-		const ctx = { actor: { actorId: "" }, channelId: this.channelData.name };
-		const scopeRefs = opDef.scope(input, ctx);
+	): SubmitResult | null {
+		const scopeRefs = opDef.scope(input, this.buildCtx());
 
-		if (scopeRefs.length !== 1) {
-			// Optimistic operations must target exactly one shard
-			return null;
-		}
+		if (scopeRefs.length !== 1) return null;
 
 		const ref = scopeRefs[0];
 		if (!ref) return null;
@@ -167,23 +222,43 @@ export class ClientChannelEngine {
 		const store = this.stores.get(shardId);
 		if (!store) return null;
 
-		// Check in-flight slot
 		if (store.hasInFlight) {
 			return {
-				type: "reject",
-				opId,
-				code: "PENDING_OPERATION",
-				message: `Another operation on shard "${shardId}" hasn't resolved yet`,
+				status: "blocked",
+				error: {
+					code: "PENDING_OPERATION",
+					message: `Another operation on shard "${shardId}" hasn't resolved yet`,
+				},
 			};
 		}
 
-		// Compute prediction via Immer produce
-		const authoritative = store.authoritative;
-		if (!authoritative) return null;
+		this.computeAndSetPrediction(
+			store,
+			opDef,
+			input,
+			opId,
+			operationName,
+			shardId,
+		);
+		return null;
+	}
 
+	/** Compute prediction via Immer produce and set on store */
+	private computeAndSetPrediction(
+		store: ShardStore<Record<string, unknown>>,
+		opDef: OperationDefinition,
+		input: unknown,
+		opId: string,
+		operationName: string,
+		shardId: string,
+	): void {
+		const authoritative = store.authoritative;
+		if (!authoritative || !opDef.apply) return;
+
+		const ctx = this.buildCtx();
+		const scopeRefs = opDef.scope(input, ctx);
 		const root: Record<string, unknown> = { [shardId]: authoritative };
 		const applyFn = opDef.apply;
-		if (!applyFn) return null;
 
 		const newRoot = produce(root, (draft) => {
 			const accessors = buildShardAccessors(
@@ -195,14 +270,112 @@ export class ClientChannelEngine {
 		});
 
 		const predictedState = newRoot[shardId] as Record<string, unknown>;
-
-		store.setOptimistic({ opId, operationName, input }, predictedState);
+		const inFlight: InFlight = { opId, operationName, input };
+		store.setOptimistic(inFlight, predictedState);
 		this.inFlightShards.set(opId, shardId);
-
-		return null;
 	}
 
-	get name(): string {
-		return this.channelData.name;
+	/**
+	 * Try canRetry on VERSION_CONFLICT. If retry succeeds, sends a new submit
+	 * with a fresh opId while keeping the original promise and in-flight slot.
+	 */
+	private tryRetry(oldOpId: string): boolean {
+		const pending = this.pendingSubmits.get(oldOpId);
+		if (!pending) return false;
+
+		const shardId = this.inFlightShards.get(oldOpId);
+		if (!shardId) return false;
+
+		const store = this.stores.get(shardId);
+		if (!store) return false;
+
+		const inFlight = store.getInFlight();
+		if (!inFlight) return false;
+
+		const opDef = this.channelData.operations.get(inFlight.operationName);
+		if (!opDef) return false;
+
+		// Build fresh shard accessors for canRetry evaluation
+		const authoritative = store.authoritative;
+		if (!authoritative) return false;
+
+		const ctx = this.buildCtx();
+		const scopeRefs = opDef.scope(inFlight.input, ctx);
+		const root: Record<string, unknown> = { [shardId]: authoritative };
+		const freshAccessors = buildShardAccessors(
+			root,
+			scopeRefs,
+			this.channelData.shardDefs,
+		);
+
+		// canRetry defaults to true if not defined
+		const clientImpl = this.channelData.clientImpls.get(inFlight.operationName);
+		const shouldRetry = clientImpl?.canRetry
+			? clientImpl.canRetry(inFlight.input, freshAccessors, 1)
+			: true;
+		if (!shouldRetry) return false;
+
+		// Retry: new opId, remap pending + in-flight, recompute prediction, resend
+		const newOpId = `${this.channelData.name}:${String(this.opCounter++)}`;
+
+		this.pendingSubmits.delete(oldOpId);
+		this.pendingSubmits.set(newOpId, pending);
+		this.inFlightShards.delete(oldOpId);
+
+		this.computeAndSetPrediction(
+			store,
+			opDef,
+			inFlight.input,
+			newOpId,
+			inFlight.operationName,
+			shardId,
+		);
+
+		this.startTimer(newOpId);
+		this.transport.send({
+			type: "submit",
+			channelId: this.channelData.name,
+			operationName: inFlight.operationName,
+			input: inFlight.input,
+			opId: newOpId,
+		});
+
+		return true;
+	}
+
+	private buildCtx(): { actor: { actorId: string }; channelId: string } {
+		return {
+			actor: { actorId: this.actorId },
+			channelId: this.channelData.name,
+		};
+	}
+
+	private clearInFlightForOp(opId: string): void {
+		const shardId = this.inFlightShards.get(opId);
+		if (shardId) {
+			this.inFlightShards.delete(opId);
+			this.stores.get(shardId)?.clearInFlight();
+		}
+	}
+
+	private startTimer(opId: string): void {
+		const timer = setTimeout(() => {
+			this.timeouts.delete(opId);
+			const pending = this.pendingSubmits.get(opId);
+			if (pending) {
+				this.pendingSubmits.delete(opId);
+				this.clearInFlightForOp(opId);
+				pending.resolve({ status: "timeout" });
+			}
+		}, this.submitTimeoutMs);
+		this.timeouts.set(opId, timer);
+	}
+
+	private clearTimer(opId: string): void {
+		const timer = this.timeouts.get(opId);
+		if (timer) {
+			globalThis.clearTimeout(timer);
+			this.timeouts.delete(opId);
+		}
 	}
 }

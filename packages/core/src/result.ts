@@ -18,7 +18,7 @@ export interface RejectionError<TCode extends string = string> {
 
 /** Submit result — discriminated union, never throws */
 export type SubmitResult<
-	TConsumerErrors extends string = never,
+	TConsumerErrors extends string = string,
 	TFreshState = unknown,
 > =
 	| { readonly status: "acknowledged" }
@@ -30,4 +30,6 @@ export type SubmitResult<
 	| {
 			readonly status: "blocked";
 			readonly error: RejectionError<BlockedCode>;
-	  };
+	  }
+	| { readonly status: "timeout" }
+	| { readonly status: "disconnected" };

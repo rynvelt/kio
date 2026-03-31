@@ -134,7 +134,7 @@ describe("End-to-end", () => {
 
 		const result = await client.channel("game").submit("advanceTurn", {});
 
-		expect(result.type).toBe("acknowledge");
+		expect(result.status).toBe("acknowledged");
 
 		const snap = client.channel("game").shardState("world");
 		expect(snap.state).toEqual({ stage: "PLAYING", turn: 1 });
@@ -147,7 +147,7 @@ describe("End-to-end", () => {
 			.channel("game")
 			.submit("addItem", { seatId: "1", item: "shield" });
 
-		expect(result.type).toBe("acknowledge");
+		expect(result.status).toBe("acknowledged");
 
 		const snap = client.channel("game").shardState("seat:1");
 		expect(snap.state).toEqual({

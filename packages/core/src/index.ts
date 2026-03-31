@@ -47,4 +47,5 @@ export type {
 	StateMessage,
 	SubmitMessage,
 	VersionsMessage,
+	WelcomeMessage,
 } from "./transport";

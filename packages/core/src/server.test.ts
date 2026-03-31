@@ -350,13 +350,14 @@ describe("createServer", () => {
 			connect();
 			await new Promise((r) => setTimeout(r, 10));
 
-			// Step 1: server sends its versions
+			// Step 1: server sends welcome with actorId + versions
 			expect(received).toHaveLength(1);
-			const versions = received[0];
-			expectToBeDefined(versions);
-			expect(versions.type).toBe("versions");
-			if (versions.type === "versions") {
-				expect(versions.shards.world).toBe(1);
+			const welcome = received[0];
+			expectToBeDefined(welcome);
+			expect(welcome.type).toBe("welcome");
+			if (welcome.type === "welcome") {
+				expect(welcome.shards.world).toBe(1);
+				expect(welcome.actorId).toBeDefined();
 			}
 
 			// Step 2: client responds with its versions (empty = first connect)

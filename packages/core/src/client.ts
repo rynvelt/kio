@@ -1,16 +1,15 @@
 import type { ChannelBuilder } from "./channel";
 import { ClientChannelEngine } from "./client-channel-engine";
 import type { EngineBuilder } from "./engine";
+import type { SubmitResult } from "./result";
 import type { ShardState } from "./state";
-import type {
-	AcknowledgeMessage,
-	ClientTransport,
-	RejectMessage,
-} from "./transport";
+import type { ClientTransport } from "./transport";
 
 /** Configuration for createClient */
 export interface ClientConfig {
 	readonly transport: ClientTransport;
+	/** Timeout in ms for submit operations. Default: 10000 */
+	readonly submitTimeoutMs?: number;
 }
 
 /** Extract operation names from a ChannelBuilder's Ops type */
@@ -34,7 +33,7 @@ export interface ClientChannel<Ch> {
 	submit<OpName extends OperationNames<Ch>>(
 		operationName: OpName,
 		input: OperationInput<Ch, OpName>,
-	): Promise<AcknowledgeMessage | RejectMessage>;
+	): Promise<SubmitResult>;
 
 	shardState(shardId: string): ShardState<Record<string, unknown>>;
 
@@ -57,17 +56,24 @@ export function createClient<TChannels extends object>(
 ): Client<TChannels> {
 	const engines = new Map<string, ClientChannelEngine>();
 	let isReady = false;
+	const timeoutMs = config.submitTimeoutMs ?? 10_000;
 
 	// Create a ClientChannelEngine per channel
 	for (const [name, channelData] of engineBuilder["~channels"]) {
-		engines.set(name, new ClientChannelEngine(channelData, config.transport));
+		engines.set(
+			name,
+			new ClientChannelEngine(channelData, config.transport, timeoutMs),
+		);
 	}
 
 	// Wire transport messages to the right engine
 	config.transport.onMessage((message) => {
 		switch (message.type) {
-			case "versions":
-				// Server sent its versions — respond with ours
+			case "welcome":
+				// Server sent welcome with actorId + versions — respond with ours
+				for (const eng of engines.values()) {
+					eng.setActorId(message.actorId);
+				}
 				config.transport.send({
 					type: "versions",
 					shards: collectLocalVersions(engines),
@@ -102,7 +108,15 @@ export function createClient<TChannels extends object>(
 
 	// When transport connects, the server initiates the handshake
 	config.transport.onConnected(() => {
-		// Nothing to do — server sends versions first, we respond in onMessage
+		// Nothing to do — server sends welcome first, we respond in onMessage
+	});
+
+	// On disconnect, resolve all pending submits with disconnected
+	config.transport.onDisconnected(() => {
+		isReady = false;
+		for (const eng of engines.values()) {
+			eng.handleDisconnect();
+		}
 	});
 
 	return {

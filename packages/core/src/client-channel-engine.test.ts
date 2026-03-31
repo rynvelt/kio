@@ -186,7 +186,7 @@ describe("ClientChannelEngine", () => {
 			});
 
 			const result = await promise;
-			expect(result.type).toBe("acknowledge");
+			expect(result.status).toBe("acknowledged");
 		});
 
 		test("resolves with reject on server rejection", async () => {
@@ -209,9 +209,9 @@ describe("ClientChannelEngine", () => {
 			}
 
 			const result = await promise;
-			expect(result.type).toBe("reject");
-			if (result.type === "reject") {
-				expect(result.code).toBe("UNAUTHORIZED");
+			expect(result.status).toBe("rejected");
+			if (result.status === "rejected") {
+				expect(result.error.code).toBe("UNAUTHORIZED");
 			}
 		});
 
@@ -325,9 +325,9 @@ describe("ClientChannelEngine", () => {
 			engine.submit("advanceTurn", {});
 			const result = await engine.submit("advanceTurn", {});
 
-			expect(result.type).toBe("reject");
-			if (result.type === "reject") {
-				expect(result.code).toBe("PENDING_OPERATION");
+			expect(result.status).toBe("blocked");
+			if (result.status === "blocked") {
+				expect(result.error.code).toBe("PENDING_OPERATION");
 			}
 		});
 
@@ -392,7 +392,7 @@ describe("ClientChannelEngine", () => {
 			// Server acknowledge resolves promise
 			engine.handleSubmitResponse({ type: "acknowledge", opId });
 			const result = await promise;
-			expect(result.type).toBe("acknowledge");
+			expect(result.status).toBe("acknowledged");
 		});
 
 		test("server reject clears in-flight, reverts to authoritative", async () => {
@@ -406,12 +406,12 @@ describe("ClientChannelEngine", () => {
 			engine.handleSubmitResponse({
 				type: "reject",
 				opId,
-				code: "VERSION_CONFLICT",
-				message: "conflict",
+				code: "UNAUTHORIZED",
+				message: "not allowed",
 			});
 
 			const result = await promise;
-			expect(result.type).toBe("reject");
+			expect(result.status).toBe("rejected");
 
 			const snap = engine.shardState("world");
 			// Reverted to authoritative
@@ -470,8 +470,8 @@ describe("ClientChannelEngine", () => {
 			engine.handleSubmitResponse({
 				type: "reject",
 				opId,
-				code: "VERSION_CONFLICT",
-				message: "conflict",
+				code: "UNAUTHORIZED",
+				message: "not allowed",
 			});
 			await promise;
 
@@ -517,8 +517,8 @@ describe("ClientChannelEngine", () => {
 			engine.handleSubmitResponse({
 				type: "reject",
 				opId: opId1,
-				code: "VERSION_CONFLICT",
-				message: "conflict",
+				code: "UNAUTHORIZED",
+				message: "not allowed",
 			});
 			await promise1;
 
@@ -533,6 +533,255 @@ describe("ClientChannelEngine", () => {
 					{ id: "shield", name: "shield" },
 				],
 			});
+		});
+	});
+
+	describe("canRetry on VERSION_CONFLICT", () => {
+		function setupWithRetry(
+			canRetry?: (
+				input: unknown,
+				freshShards: unknown,
+				attemptCount: number,
+			) => boolean,
+		) {
+			const ch = channel
+				.durable("game")
+				.shard("world", v.object({ stage: v.string(), turn: v.number() }))
+				.operation("advanceTurn", {
+					execution: "optimistic",
+					input: v.object({}),
+					scope: () => [shard.ref("world")],
+					apply(shards) {
+						shards.world.turn += 1;
+					},
+				});
+
+			const withClientImpl = canRetry
+				? ch.clientImpl("advanceTurn", { canRetry })
+				: ch;
+
+			const { client, server } = createDirectTransport();
+			const eng = new ClientChannelEngine(withClientImpl["~data"], client);
+
+			const sent: ClientMessage[] = [];
+			server.onMessage((_connId, msg) => sent.push(msg));
+
+			eng.handleStateMessage({
+				type: "state",
+				channelId: "game",
+				kind: "durable",
+				shards: [
+					{
+						shardId: "world",
+						version: 1,
+						state: { stage: "PLAYING", turn: 0 },
+					},
+				],
+			});
+
+			return { engine: eng, sent };
+		}
+
+		test("retries by default on VERSION_CONFLICT (no canRetry defined)", () => {
+			const { engine, sent } = setupWithRetry();
+
+			engine.submit("advanceTurn", {});
+			const msg1 = sent[0];
+			expectToBeDefined(msg1);
+			const opId1 = msg1.type === "submit" ? msg1.opId : "";
+
+			// VERSION_CONFLICT with fresh state
+			engine.handleSubmitResponse({
+				type: "reject",
+				opId: opId1,
+				code: "VERSION_CONFLICT",
+				message: "conflict",
+				shards: [
+					{
+						shardId: "world",
+						version: 2,
+						state: { stage: "PLAYING", turn: 5 },
+					},
+				],
+			});
+
+			// A second submit was sent (the retry)
+			expect(sent).toHaveLength(2);
+			const msg2 = sent[1];
+			expectToBeDefined(msg2);
+			expect(msg2.type).toBe("submit");
+		});
+
+		test("canRetry returning false does not retry", async () => {
+			const { engine, sent } = setupWithRetry(() => false);
+
+			const promise = engine.submit("advanceTurn", {});
+			const msg1 = sent[0];
+			expectToBeDefined(msg1);
+			const opId1 = msg1.type === "submit" ? msg1.opId : "";
+
+			engine.handleSubmitResponse({
+				type: "reject",
+				opId: opId1,
+				code: "VERSION_CONFLICT",
+				message: "conflict",
+				shards: [
+					{
+						shardId: "world",
+						version: 2,
+						state: { stage: "PLAYING", turn: 5 },
+					},
+				],
+			});
+
+			// No retry sent
+			expect(sent).toHaveLength(1);
+
+			const result = await promise;
+			expect(result.status).toBe("rejected");
+		});
+
+		test("retry recomputes prediction against fresh state", () => {
+			const { engine, sent } = setupWithRetry();
+
+			engine.submit("advanceTurn", {});
+			expect(engine.shardState("world").state).toEqual({
+				stage: "PLAYING",
+				turn: 1,
+			});
+
+			const msg1 = sent[0];
+			expectToBeDefined(msg1);
+			const opId1 = msg1.type === "submit" ? msg1.opId : "";
+
+			// Fresh state has turn: 5
+			engine.handleSubmitResponse({
+				type: "reject",
+				opId: opId1,
+				code: "VERSION_CONFLICT",
+				message: "conflict",
+				shards: [
+					{
+						shardId: "world",
+						version: 2,
+						state: { stage: "PLAYING", turn: 5 },
+					},
+				],
+			});
+
+			// Prediction recomputed: 5 + 1 = 6
+			expect(engine.shardState("world").state).toEqual({
+				stage: "PLAYING",
+				turn: 6,
+			});
+		});
+
+		test("retry acknowledge resolves original promise", async () => {
+			const { engine, sent } = setupWithRetry();
+
+			const promise = engine.submit("advanceTurn", {});
+			const msg1 = sent[0];
+			expectToBeDefined(msg1);
+			const opId1 = msg1.type === "submit" ? msg1.opId : "";
+
+			engine.handleSubmitResponse({
+				type: "reject",
+				opId: opId1,
+				code: "VERSION_CONFLICT",
+				message: "conflict",
+				shards: [
+					{
+						shardId: "world",
+						version: 2,
+						state: { stage: "PLAYING", turn: 5 },
+					},
+				],
+			});
+
+			// Acknowledge the retry
+			const msg2 = sent[1];
+			expectToBeDefined(msg2);
+			const opId2 = msg2.type === "submit" ? msg2.opId : "";
+			engine.handleSubmitResponse({ type: "acknowledge", opId: opId2 });
+
+			const result = await promise;
+			expect(result.status).toBe("acknowledged");
+		});
+	});
+
+	describe("timeout", () => {
+		test("resolves with timeout after submitTimeoutMs", async () => {
+			const ch = channel
+				.durable("game")
+				.shard("world", v.object({ turn: v.number() }))
+				.operation("advanceTurn", {
+					execution: "optimistic",
+					input: v.object({}),
+					scope: () => [shard.ref("world")],
+					apply(shards) {
+						shards.world.turn += 1;
+					},
+				});
+
+			const { client, server } = createDirectTransport();
+			const eng = new ClientChannelEngine(ch["~data"], client, 5);
+
+			const sent: ClientMessage[] = [];
+			server.onMessage((_connId, msg) => sent.push(msg));
+
+			eng.handleStateMessage({
+				type: "state",
+				channelId: "game",
+				kind: "durable",
+				shards: [{ shardId: "world", version: 1, state: { turn: 0 } }],
+			});
+
+			const result = await eng.submit("advanceTurn", {});
+			expect(result.status).toBe("timeout");
+
+			// In-flight cleared
+			expect(eng.shardState("world").pending).toBeNull();
+			expect(eng.shardState("world").state).toEqual({ turn: 0 });
+		});
+	});
+
+	describe("disconnect", () => {
+		test("resolves pending submits with disconnected", async () => {
+			const ch = channel
+				.durable("game")
+				.shard("world", v.object({ turn: v.number() }))
+				.operation("advanceTurn", {
+					execution: "optimistic",
+					input: v.object({}),
+					scope: () => [shard.ref("world")],
+					apply(shards) {
+						shards.world.turn += 1;
+					},
+				});
+
+			const { client, server } = createDirectTransport();
+			const eng = new ClientChannelEngine(ch["~data"], client);
+
+			const sent: ClientMessage[] = [];
+			server.onMessage((_connId, msg) => sent.push(msg));
+
+			eng.handleStateMessage({
+				type: "state",
+				channelId: "game",
+				kind: "durable",
+				shards: [{ shardId: "world", version: 1, state: { turn: 0 } }],
+			});
+
+			const promise = eng.submit("advanceTurn", {});
+			expect(sent).toHaveLength(1);
+
+			eng.handleDisconnect();
+
+			const result = await promise;
+			expect(result.status).toBe("disconnected");
+
+			// In-flight cleared
+			expect(eng.shardState("world").pending).toBeNull();
 		});
 	});
 });

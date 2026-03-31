@@ -176,7 +176,8 @@ export function createServer<TChannels extends object>(
 		pendingConnections.set(connectionId, { actor, channelStates });
 
 		transport?.send(connectionId, {
-			type: "versions",
+			type: "welcome",
+			actorId: actor.actorId,
 			shards: serverVersions,
 		});
 	}

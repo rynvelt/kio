@@ -70,6 +70,11 @@ export class ShardStore<T extends Record<string, unknown>> {
 		return this.inFlight !== null;
 	}
 
+	/** Get the in-flight operation metadata (for retry logic) */
+	getInFlight(): InFlight | null {
+		return this.inFlight;
+	}
+
 	/** The current authoritative state (for building apply() input) */
 	get authoritative(): T | null {
 		return this.received?.state ?? null;

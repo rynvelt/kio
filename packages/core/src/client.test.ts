@@ -103,16 +103,17 @@ describe("createClient", () => {
 		expect(snap.state).toEqual({ stage: "PLAYING", turn: 1 });
 	});
 
-	test("responds to server versions with client versions", () => {
+	test("responds to server welcome with client versions", () => {
 		const { client: transport, server } = createDirectTransport();
 		createClient(setupClientEngine(), { transport });
 
 		const captured: ClientMessage[] = [];
 		server.onMessage((_id, msg) => captured.push(msg));
 
-		// Server sends versions
+		// Server sends welcome
 		server.send("direct", {
-			type: "versions",
+			type: "welcome",
+			actorId: "player:alice",
 			shards: { world: 5 },
 		});
 
@@ -170,7 +171,7 @@ describe("createClient", () => {
 		}
 
 		const result = await promise;
-		expect(result.type).toBe("acknowledge");
+		expect(result.status).toBe("acknowledged");
 	});
 
 	test("throws on unknown channel name", () => {
