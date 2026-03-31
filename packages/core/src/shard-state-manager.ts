@@ -7,6 +7,7 @@ import {
 import type { ShardDefinition } from "./channel";
 import type { StateAdapter } from "./persistence";
 import type { ShardRef } from "./shard";
+import { buildShardAccessors } from "./shard-accessors";
 
 enablePatches();
 enableMapSet();
@@ -84,36 +85,12 @@ export class ShardStateManager {
 		return root;
 	}
 
-	/**
-	 * Build shard accessors from a root object.
-	 * Singleton shards → direct property access.
-	 * Per-resource shards → function that maps resource ID to root entry.
-	 */
+	/** Build shard accessors from a root object. Delegates to shared utility. */
 	buildAccessors(
 		root: Record<string, unknown>,
 		scopedRefs: readonly ShardRef[],
 	): Record<string, unknown> {
-		const accessors: Record<string, unknown> = {};
-		const scopedShardTypes = new Set(scopedRefs.map((r) => r.shardType));
-
-		for (const shardType of scopedShardTypes) {
-			const def = this.shardDefs.get(shardType);
-			if (!def) continue;
-
-			if (def.kind === "singleton") {
-				Object.defineProperty(accessors, shardType, {
-					get: () => root[shardType],
-					enumerable: true,
-				});
-			} else {
-				accessors[shardType] = (resourceId: string) => {
-					const shardId = `${shardType}:${resourceId}`;
-					return root[shardId];
-				};
-			}
-		}
-
-		return accessors;
+		return buildShardAccessors(root, scopedRefs, this.shardDefs);
 	}
 
 	/**

@@ -319,6 +319,194 @@ describe("ShardStore", () => {
 		});
 	});
 
+	describe("optimistic — in-flight and prediction", () => {
+		test("setOptimistic shows predicted state and pending", () => {
+			const store = new ShardStore<{ turn: number }>("durable");
+			store.grantAccess();
+			store.applyBroadcastEntry({
+				shardId: "world",
+				version: 1,
+				state: { turn: 0 },
+			});
+
+			store.setOptimistic(
+				{ opId: "game:0", operationName: "advanceTurn", input: {} },
+				{ turn: 1 },
+			);
+
+			const snap = store.snapshot;
+			expect(snap.state).toEqual({ turn: 1 });
+			expect(snap.pending).toEqual({ operationName: "advanceTurn", input: {} });
+		});
+
+		test("hasInFlight is true after setOptimistic", () => {
+			const store = new ShardStore<{ turn: number }>("durable");
+			store.grantAccess();
+			store.applyBroadcastEntry({
+				shardId: "world",
+				version: 1,
+				state: { turn: 0 },
+			});
+			expect(store.hasInFlight).toBe(false);
+
+			store.setOptimistic(
+				{ opId: "game:0", operationName: "advanceTurn", input: {} },
+				{ turn: 1 },
+			);
+			expect(store.hasInFlight).toBe(true);
+		});
+
+		test("broadcast drops prediction, shows authoritative", () => {
+			const store = new ShardStore<{ turn: number }>("durable");
+			store.grantAccess();
+			store.applyBroadcastEntry({
+				shardId: "world",
+				version: 1,
+				state: { turn: 0 },
+			});
+			store.setOptimistic(
+				{ opId: "game:0", operationName: "advanceTurn", input: {} },
+				{ turn: 1 },
+			);
+
+			// Someone else's broadcast
+			store.applyBroadcastEntry({
+				shardId: "world",
+				version: 2,
+				state: { turn: 99 },
+				causedBy: { opId: "other:0", operation: "x", actor: "bob" },
+			});
+
+			const snap = store.snapshot;
+			expect(snap.state).toEqual({ turn: 99 });
+			// in-flight remains (awaiting server response)
+			expect(snap.pending).toEqual({ operationName: "advanceTurn", input: {} });
+		});
+
+		test("broadcast with matching opId clears in-flight", () => {
+			const store = new ShardStore<{ turn: number }>("durable");
+			store.grantAccess();
+			store.applyBroadcastEntry({
+				shardId: "world",
+				version: 1,
+				state: { turn: 0 },
+			});
+			store.setOptimistic(
+				{ opId: "game:0", operationName: "advanceTurn", input: {} },
+				{ turn: 1 },
+			);
+
+			// Our own broadcast confirms the operation
+			store.applyBroadcastEntry({
+				shardId: "world",
+				version: 2,
+				state: { turn: 1 },
+				causedBy: { opId: "game:0", operation: "advanceTurn", actor: "alice" },
+			});
+
+			const snap = store.snapshot;
+			expect(snap.state).toEqual({ turn: 1 });
+			expect(snap.pending).toBeNull();
+			expect(store.hasInFlight).toBe(false);
+		});
+
+		test("clearInFlight reverts to authoritative", () => {
+			const store = new ShardStore<{ turn: number }>("durable");
+			store.grantAccess();
+			store.applyBroadcastEntry({
+				shardId: "world",
+				version: 1,
+				state: { turn: 0 },
+			});
+			store.setOptimistic(
+				{ opId: "game:0", operationName: "advanceTurn", input: {} },
+				{ turn: 1 },
+			);
+
+			store.clearInFlight();
+
+			const snap = store.snapshot;
+			expect(snap.state).toEqual({ turn: 0 });
+			expect(snap.pending).toBeNull();
+			expect(store.hasInFlight).toBe(false);
+		});
+
+		test("revokeAccess clears in-flight and prediction", () => {
+			const store = new ShardStore<{ turn: number }>("durable");
+			store.grantAccess();
+			store.applyBroadcastEntry({
+				shardId: "world",
+				version: 1,
+				state: { turn: 0 },
+			});
+			store.setOptimistic(
+				{ opId: "game:0", operationName: "advanceTurn", input: {} },
+				{ turn: 1 },
+			);
+
+			store.revokeAccess();
+
+			expect(store.snapshot.syncStatus).toBe("unavailable");
+			expect(store.hasInFlight).toBe(false);
+		});
+
+		test("setOptimistic notifies subscribers", () => {
+			const store = new ShardStore<{ turn: number }>("durable");
+			store.grantAccess();
+			store.applyBroadcastEntry({
+				shardId: "world",
+				version: 1,
+				state: { turn: 0 },
+			});
+
+			let callCount = 0;
+			store.subscribe(() => {
+				callCount += 1;
+			});
+
+			store.setOptimistic(
+				{ opId: "game:0", operationName: "advanceTurn", input: {} },
+				{ turn: 1 },
+			);
+			expect(callCount).toBe(1);
+		});
+
+		test("clearInFlight notifies subscribers", () => {
+			const store = new ShardStore<{ turn: number }>("durable");
+			store.grantAccess();
+			store.applyBroadcastEntry({
+				shardId: "world",
+				version: 1,
+				state: { turn: 0 },
+			});
+			store.setOptimistic(
+				{ opId: "game:0", operationName: "advanceTurn", input: {} },
+				{ turn: 1 },
+			);
+
+			let callCount = 0;
+			store.subscribe(() => {
+				callCount += 1;
+			});
+
+			store.clearInFlight();
+			expect(callCount).toBe(1);
+		});
+
+		test("clearInFlight is no-op when nothing in-flight", () => {
+			const store = new ShardStore<{ turn: number }>("durable");
+			store.grantAccess();
+
+			let callCount = 0;
+			store.subscribe(() => {
+				callCount += 1;
+			});
+
+			store.clearInFlight();
+			expect(callCount).toBe(0);
+		});
+	});
+
 	describe("version tracking", () => {
 		test("version is null initially", () => {
 			const store = new ShardStore<{ turn: number }>("durable");

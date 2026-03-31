@@ -7,6 +7,13 @@ enableMapSet();
 
 type Listener = () => void;
 
+/** In-flight operation metadata stored on the shard */
+export interface InFlight {
+	readonly opId: string;
+	readonly operationName: string;
+	readonly input: unknown;
+}
+
 /**
  * Client-side store for a single shard's state.
  * Framework-agnostic — compatible with useSyncExternalStore via kio-react.
@@ -15,6 +22,14 @@ type Listener = () => void;
  * - unavailable: no access (initial, or access revoked)
  * - loading: access granted, waiting for first state from server
  * - latest: has current state from server
+ *
+ * Optimistic lifecycle:
+ * - inFlight: an operation has been sent to the server, awaiting response
+ * - prediction: the predicted state from running apply() at submit time
+ *
+ * These have independent lifetimes:
+ * - prediction is dropped on any broadcast to this shard
+ * - inFlight is cleared on server response (ack/reject), timeout, or disconnect
  */
 export class ShardStore<T extends Record<string, unknown>> {
 	/** State received from the server's last broadcast. null until first broadcast arrives. */
@@ -22,9 +37,14 @@ export class ShardStore<T extends Record<string, unknown>> {
 	private accessGranted = false;
 	private listeners = new Set<Listener>();
 
+	/** In-flight operation — cleared on server response, timeout, or disconnect */
+	private inFlight: InFlight | null = null;
+	/** Predicted state from optimistic apply — dropped on any broadcast */
+	private prediction: { state: T } | null = null;
+
 	constructor(private readonly kind: "durable" | "ephemeral") {}
 
-	/** Consumer-facing snapshot — derived from received state + access. */
+	/** Consumer-facing snapshot — prediction overrides authoritative when present. */
 	get snapshot(): ShardState<T> {
 		if (!this.accessGranted) {
 			return { syncStatus: "unavailable", state: null, pending: null };
@@ -32,17 +52,57 @@ export class ShardStore<T extends Record<string, unknown>> {
 		if (!this.received) {
 			return { syncStatus: "loading", state: null, pending: null };
 		}
+		const pending = this.inFlight
+			? {
+					operationName: this.inFlight.operationName,
+					input: this.inFlight.input,
+				}
+			: null;
 		return {
 			syncStatus: "latest",
-			state: this.received.state,
-			pending: null,
+			state: this.prediction ? this.prediction.state : this.received.state,
+			pending,
 		};
+	}
+
+	/** Whether this shard has an in-flight operation (blocks new optimistic submits) */
+	get hasInFlight(): boolean {
+		return this.inFlight !== null;
+	}
+
+	/** The current authoritative state (for building apply() input) */
+	get authoritative(): T | null {
+		return this.received?.state ?? null;
+	}
+
+	/**
+	 * Set the in-flight operation and predicted state after optimistic apply.
+	 * Called by ClientChannelEngine on optimistic submit.
+	 */
+	setOptimistic(inFlight: InFlight, predictedState: T): void {
+		this.inFlight = inFlight;
+		this.prediction = { state: predictedState };
+		this.notify();
+	}
+
+	/**
+	 * Clear the in-flight slot. Called on server acknowledge, reject, timeout, or disconnect.
+	 * Also clears prediction if it still exists.
+	 */
+	clearInFlight(): void {
+		if (!this.inFlight) return;
+		this.inFlight = null;
+		this.prediction = null;
+		this.notify();
 	}
 
 	/**
 	 * Apply a broadcast entry from the server.
 	 * Handles full state and patch entries.
 	 * Durable shards ignore stale broadcasts (version <= current).
+	 *
+	 * If a prediction exists, it is always dropped — authoritative state is truth.
+	 * If causedBy.opId matches our in-flight, also clears in-flight (confirmed).
 	 */
 	applyBroadcastEntry(entry: BroadcastShardEntry): void {
 		if (
@@ -68,6 +128,18 @@ export class ShardStore<T extends Record<string, unknown>> {
 			return;
 		}
 
+		// Drop prediction on any broadcast
+		this.prediction = null;
+
+		// If this broadcast confirms our in-flight operation, clear it
+		if (
+			this.inFlight &&
+			entry.causedBy &&
+			entry.causedBy.opId === this.inFlight.opId
+		) {
+			this.inFlight = null;
+		}
+
 		this.notify();
 	}
 
@@ -83,6 +155,8 @@ export class ShardStore<T extends Record<string, unknown>> {
 		if (!this.accessGranted) return;
 		this.accessGranted = false;
 		this.received = null;
+		this.inFlight = null;
+		this.prediction = null;
 		this.notify();
 	}
 
