@@ -17,8 +17,8 @@ Transport wiring, connection handshake, server-as-actor.
 ### Remaining refinements
 
 3. **VERSION_CONFLICT fresh state** ✅ — rejection includes current shard state for canRetry. Optional `shards` field on RejectMessage and PipelineResult, populated for VERSION_CONFLICT by reloading from state manager after failed CAS.
-4. **Server-as-actor retry** — maxRetries option on submit
-5. **broadcastMode: "full"** — send full state instead of patches when configured
+4. **Server-as-actor retry** — deferred. Most server-as-actor operations use `versionChecked: false` (unconditional write with version increment), which never conflicts. For the rare `versionChecked: true` case, maxRetries can be added later.
+5. **broadcastMode: "full"** ✅ — channel option `broadcastMode: "full"` sends complete shard state instead of patches on autoBroadcast. Exhaustive switch in ChannelEngine selects patch vs full broadcast.
 
 ### Design decisions
 
