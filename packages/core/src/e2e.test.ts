@@ -33,6 +33,16 @@ const gameChannel = channel
 				name: input.item,
 			});
 		},
+	})
+	.operation("setStage", {
+		execution: "optimistic",
+		versionChecked: false,
+		deduplicate: false,
+		input: v.object({ stage: v.string() }),
+		scope: () => [shard.ref("world")],
+		apply(shards, input) {
+			shards.world.stage = input.stage;
+		},
 	});
 
 const presenceChannel = channel
@@ -174,6 +184,29 @@ describe("End-to-end", () => {
 
 		const after = client.channel("presence").shardState("player:alice");
 		expect(after.state).toEqual({ online: true });
+	});
+
+	test("server-as-actor unconditional write updates client", async () => {
+		const { server, client, adapter } = await setupE2E();
+
+		// First, advance turn so version > 1
+		await server.submit("game", "advanceTurn", {});
+		const versionBefore = (await adapter.load("game", "world"))?.version;
+
+		// Server submits with versionChecked: false — always succeeds
+		const result = await server.submit("game", "setStage", {
+			stage: "FINISHED",
+		});
+		expect(result.status).toBe("acknowledged");
+
+		// Client received the broadcast with updated state
+		const snap = client.channel("game").shardState("world");
+		expect((snap.state as { stage: string }).stage).toBe("FINISHED");
+
+		// Persisted with incremented version
+		const persisted = await adapter.load("game", "world");
+		expect((persisted?.state as { stage: string }).stage).toBe("FINISHED");
+		expect(persisted?.version).toBeGreaterThan(versionBefore ?? 0);
 	});
 
 	test("client subscriber notified on broadcast", async () => {
