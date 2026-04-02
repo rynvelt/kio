@@ -28,6 +28,7 @@ export class ChannelEngine {
 	private readonly pipeline: OperationPipeline;
 	private readonly broadcastManager: BroadcastManager;
 	private readonly autoBroadcast: boolean;
+	private readonly broadcastMode: "patch" | "full";
 
 	constructor(
 		private readonly channelData: ChannelData,
@@ -35,6 +36,7 @@ export class ChannelEngine {
 		config: ChannelEngineConfig = {},
 	) {
 		this.autoBroadcast = channelData.options.autoBroadcast ?? true;
+		this.broadcastMode = channelData.options.broadcastMode ?? "patch";
 
 		this.stateManager = new ShardStateManager(
 			channelData.name,
@@ -69,11 +71,27 @@ export class ChannelEngine {
 				actor: submission.actor.actorId,
 			};
 
-			this.broadcastManager.broadcastPatches(
-				result.patchesByShard,
-				result.shardVersions,
-				causedBy,
-			);
+			switch (this.broadcastMode) {
+				case "patch":
+					this.broadcastManager.broadcastPatches(
+						result.patchesByShard,
+						result.shardVersions,
+						causedBy,
+					);
+					break;
+				case "full":
+					this.broadcastManager.broadcastFullState(
+						[...result.patchesByShard.keys()],
+						result.shardVersions,
+						(shardId) => this.stateManager.getCached(shardId)?.state,
+						causedBy,
+					);
+					break;
+				default: {
+					const _exhaustive: never = this.broadcastMode;
+					throw new Error(`Unknown broadcastMode: ${_exhaustive}`);
+				}
+			}
 		}
 		// For autoBroadcast: false, dirty tracking happens automatically
 		// via the stateManager.onChange → broadcastManager.onShardChanged wiring

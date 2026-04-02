@@ -203,6 +203,52 @@ describe("ChannelEngine — durable, autoBroadcast: true", () => {
 	});
 });
 
+describe("ChannelEngine — durable, broadcastMode: full", () => {
+	test("broadcasts full state instead of patches", async () => {
+		const ch = channel
+			.durable("game", { broadcastMode: "full" })
+			.shard("world", v.object({ stage: v.string(), turn: v.number() }))
+			.operation("advanceTurn", {
+				execution: "optimistic",
+				input: v.object({}),
+				scope: () => [shard.ref("world")],
+				apply(shards) {
+					shards.world.turn += 1;
+				},
+			});
+
+		const adapter = new MemoryStateAdapter();
+		const engine = new ChannelEngine(ch["~data"], adapter);
+		await adapter.compareAndSwap("game", "world", 0, {
+			stage: "PLAYING",
+			turn: 0,
+		});
+
+		const sub = createSubscriber("bob");
+		engine.addSubscriber(sub, ["world"]);
+
+		await engine.submit({
+			operationName: "advanceTurn",
+			input: {},
+			actor,
+			opId: nextOpId(),
+		});
+
+		expect(sub.messages).toHaveLength(1);
+		const entry = sub.messages[0]?.shards[0];
+		expectToBeDefined(entry);
+		// Full state, not patches
+		expect("state" in entry).toBe(true);
+		expect("patches" in entry).toBe(false);
+		if ("state" in entry) {
+			expect(entry.state).toEqual({ stage: "PLAYING", turn: 1 });
+		}
+		// causedBy still present
+		expectToBeDefined(entry.causedBy);
+		expect(entry.causedBy.operation).toBe("advanceTurn");
+	});
+});
+
 describe("ChannelEngine — ephemeral, autoBroadcast: false", () => {
 	test("submit marks dirty, broadcastDirtyShards sends full state", async () => {
 		const { engine, adapter } = setupEphemeralPresence();

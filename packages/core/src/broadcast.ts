@@ -98,6 +98,42 @@ export class BroadcastManager {
 	}
 
 	/**
+	 * Called after a successful operation on autoBroadcast: true channels
+	 * with broadcastMode: "full". Sends full state to affected subscribers.
+	 */
+	broadcastFullState(
+		changedShardIds: readonly string[],
+		shardVersions: ReadonlyMap<string, number>,
+		getShardState: (shardId: string) => unknown | undefined,
+		causedBy: CausedBy,
+	): void {
+		for (const [subscriberId, subscribedShards] of this.subscriberShards) {
+			const subscriber = this.subscribers.get(subscriberId);
+			if (!subscriber) continue;
+
+			const entries: BroadcastShardEntry[] = [];
+			for (const shardId of changedShardIds) {
+				if (!subscribedShards.has(shardId)) continue;
+
+				const version = shardVersions.get(shardId) ?? 0;
+				const state = getShardState(shardId);
+				if (state !== undefined) {
+					entries.push({ shardId, version, state, causedBy });
+				}
+			}
+
+			if (entries.length > 0) {
+				subscriber.send({
+					type: "broadcast",
+					channelId: this.channelId,
+					kind: this.kind,
+					shards: entries,
+				});
+			}
+		}
+	}
+
+	/**
 	 * Called by the state manager's onChange callback.
 	 * Marks the shard as dirty for each subscriber that cares about it.
 	 */
