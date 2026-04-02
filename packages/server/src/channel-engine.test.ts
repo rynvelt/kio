@@ -1,10 +1,14 @@
 import { describe, expect, test } from "bun:test";
+import {
+	type BroadcastMessage,
+	channel,
+	type Subscriber,
+	shard,
+} from "@kio/shared";
+import { expectToBeDefined } from "@kio/shared/test";
 import * as v from "valibot";
-import type { BroadcastMessage, Subscriber } from "./broadcast";
 import { ChannelEngine } from "./channel-engine";
-import { channel, shard } from "./index";
 import { MemoryStateAdapter } from "./persistence";
-import { expectToBeDefined } from "./test-helpers";
 
 function createSubscriber(
 	id: string,

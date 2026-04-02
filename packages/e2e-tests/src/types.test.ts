@@ -3,11 +3,10 @@
  * These run as part of `just typecheck` (tsgo), not `bun test`.
  */
 
+import { createServer, MemoryStateAdapter } from "@kio/server";
+import type { ShardState, SubmitResult } from "@kio/shared";
+import { channel, engine, shard } from "@kio/shared";
 import * as v from "valibot";
-import type { ShardState, SubmitResult } from "./index";
-import { channel, engine, shard } from "./index";
-import { MemoryStateAdapter } from "./persistence";
-import { createServer } from "./server";
 
 // ── Type assertion helpers ───────────────────────────────────────────
 

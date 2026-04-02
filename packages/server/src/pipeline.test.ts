@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { channel, shard } from "@kio/shared";
+import { expectToBeDefined } from "@kio/shared/test";
 import * as v from "valibot";
-import { channel, shard } from "./index";
 import { MemoryStateAdapter } from "./persistence";
 import {
 	type Actor,
@@ -8,7 +9,6 @@ import {
 	OperationPipeline,
 } from "./pipeline";
 import { ShardStateManager } from "./shard-state-manager";
-import { expectToBeDefined } from "./test-helpers";
 
 let opCounter = 0;
 function nextOpId(): string {

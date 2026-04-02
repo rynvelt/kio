@@ -4,5 +4,5 @@
 	"compilerOptions": {
 		"rootDir": "./src"
 	},
-	"references": [{ "path": "../core" }]
+	"references": [{ "path": "../shared" }]
 }

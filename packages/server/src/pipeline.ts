@@ -1,9 +1,10 @@
-import type { Patch } from "immer";
 import type {
 	ChannelData,
 	OperationDefinition,
 	ServerImplDefinition,
-} from "./channel";
+	ShardRef,
+} from "@kio/shared";
+import type { Patch } from "immer";
 import type { ShardStateManager } from "./shard-state-manager";
 
 /** Actor identity for operation context */
@@ -304,7 +305,7 @@ export class OperationPipeline {
 	private runValidate(
 		serverImpl: ServerImplDefinition,
 		composedRoot: Record<string, unknown>,
-		scopeRefs: readonly import("./shard").ShardRef[],
+		scopeRefs: readonly ShardRef[],
 		input: unknown,
 		ctx: { actor: Actor; channelId: string },
 	): OperationRejection | undefined {

@@ -1,13 +1,15 @@
 import {
+	buildShardAccessors,
+	type ShardDefinition,
+	type ShardRef,
+} from "@kio/shared";
+import {
 	enableMapSet,
 	enablePatches,
 	type Patch,
 	produceWithPatches,
 } from "immer";
-import type { ShardDefinition } from "./channel";
 import type { StateAdapter } from "./persistence";
-import type { ShardRef } from "./shard";
-import { buildShardAccessors } from "./shard-accessors";
 
 enablePatches();
 enableMapSet();

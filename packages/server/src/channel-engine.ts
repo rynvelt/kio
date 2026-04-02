@@ -1,6 +1,5 @@
-import type { CausedBy } from "./broadcast";
-import { BroadcastManager, type Subscriber } from "./broadcast";
-import type { ChannelData } from "./channel";
+import type { CausedBy, ChannelData, Subscriber } from "@kio/shared";
+import { BroadcastManager } from "./broadcast-manager";
 import type { StateAdapter } from "./persistence";
 import {
 	type AuthorizeFn,

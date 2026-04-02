@@ -1,10 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import { type ClientMessage, channel, engine, shard } from "@kio/shared";
+import { createDirectTransport, expectToBeDefined } from "@kio/shared/test";
 import * as v from "valibot";
 import { createClient } from "./client";
-import { createDirectTransport } from "./direct-transport";
-import { channel, engine, shard } from "./index";
-import { expectToBeDefined } from "./test-helpers";
-import type { ClientMessage } from "./transport";
 
 function setupClientEngine() {
 	const gameChannel = channel

@@ -1,11 +1,8 @@
 import { describe, expect, test } from "bun:test";
+import type { BroadcastMessage, Subscriber } from "@kio/shared";
+import { expectToBeDefined } from "@kio/shared/test";
 import type { Patch } from "immer";
-import {
-	BroadcastManager,
-	type BroadcastMessage,
-	type Subscriber,
-} from "./broadcast";
-import { expectToBeDefined } from "./test-helpers";
+import { BroadcastManager } from "./broadcast-manager";
 
 function createSubscriber(
 	id: string,

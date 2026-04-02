@@ -1,10 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { createClient } from "@kio/client";
+import { createServer, MemoryStateAdapter } from "@kio/server";
+import { channel, engine, shard } from "@kio/shared";
+import { createDirectTransport } from "@kio/shared/test";
 import * as v from "valibot";
-import { createClient } from "./client";
-import { createDirectTransport } from "./direct-transport";
-import { channel, engine, shard } from "./index";
-import { MemoryStateAdapter } from "./persistence";
-import { createServer } from "./server";
 
 const gameChannel = channel
 	.durable("game")

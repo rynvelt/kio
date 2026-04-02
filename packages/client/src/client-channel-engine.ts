@@ -1,16 +1,17 @@
+import {
+	type BroadcastServerMessage,
+	buildShardAccessors,
+	type ChannelData,
+	type ClientTransport,
+	type OperationDefinition,
+	type RejectMessage,
+	type ShardState,
+	type StateMessage,
+	type SubmitResult,
+} from "@kio/shared";
 import { produce } from "immer";
-import type { ChannelData, OperationDefinition } from "./channel";
-import type { SubmitResult } from "./result";
-import { buildShardAccessors } from "./shard-accessors";
 import type { InFlight } from "./shard-store";
 import { ShardStore } from "./shard-store";
-import type { ShardState } from "./state";
-import type {
-	BroadcastServerMessage,
-	ClientTransport,
-	RejectMessage,
-	StateMessage,
-} from "./transport";
 
 type PendingSubmit = {
 	resolve: (result: SubmitResult) => void;

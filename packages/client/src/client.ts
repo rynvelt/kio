@@ -1,9 +1,11 @@
-import type { ChannelBuilder } from "./channel";
+import type {
+	ChannelBuilder,
+	ClientTransport,
+	EngineBuilder,
+	ShardState,
+	SubmitResult,
+} from "@kio/shared";
 import { ClientChannelEngine } from "./client-channel-engine";
-import type { EngineBuilder } from "./engine";
-import type { SubmitResult } from "./result";
-import type { ShardState } from "./state";
-import type { ClientTransport } from "./transport";
 
 /** Configuration for createClient */
 export interface ClientConfig {
