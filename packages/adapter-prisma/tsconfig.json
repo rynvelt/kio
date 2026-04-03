@@ -1,0 +1,9 @@
+{
+	"extends": "../tsconfig.json",
+	"include": ["src"],
+	"exclude": ["src/generated"],
+	"compilerOptions": {
+		"rootDir": "./src"
+	},
+	"references": [{ "path": "../server" }, { "path": "../shared" }]
+}

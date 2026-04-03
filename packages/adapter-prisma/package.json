@@ -1,0 +1,25 @@
+{
+	"name": "@kio/adapter-prisma",
+	"version": "0.0.1",
+	"type": "module",
+	"exports": {
+		".": {
+			"bun": "./src/index.ts",
+			"types": "./src/index.ts",
+			"default": "./src/index.ts"
+		}
+	},
+	"scripts": {
+		"prisma:generate": "bunx prisma generate"
+	},
+	"dependencies": {
+		"@kio/server": "workspace:*",
+		"@prisma/client": "7.6.0",
+		"@prisma/client-runtime-utils": "7.6.0"
+	},
+	"devDependencies": {
+		"@electric-sql/pglite": "0.4.2",
+		"pglite-prisma-adapter": "0.7.2",
+		"prisma": "7.6.0"
+	}
+}

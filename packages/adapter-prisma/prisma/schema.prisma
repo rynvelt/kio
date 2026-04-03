@@ -1,0 +1,17 @@
+datasource db {
+  provider = "postgresql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/client"
+}
+
+model ShardState {
+  channelId String
+  shardId   String
+  version   Int
+  state     Json
+
+  @@id([channelId, shardId])
+}

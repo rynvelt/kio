@@ -1,0 +1,1 @@
+export { PrismaStateAdapter } from "./adapter";

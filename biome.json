@@ -7,7 +7,7 @@
 	},
 	"files": {
 		"ignoreUnknown": false,
-		"includes": ["**", "!apps/kio-docs", "!**/*.check.ts"]
+		"includes": ["**", "!apps/kio-docs", "!**/*.check.ts", "!**/generated"]
 	},
 	"formatter": {
 		"enabled": true,
