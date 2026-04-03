@@ -51,6 +51,111 @@ describe("ClientChannelEngine", () => {
 			expect(snap.syncStatus).toBe("unavailable");
 		});
 
+		test("unavailable snapshot is referentially stable", () => {
+			const { engine } = setupGameEngine();
+			const snap1 = engine.shardState("nonexistent");
+			const snap2 = engine.shardState("nonexistent");
+			expect(snap1).toBe(snap2);
+		});
+
+		test("listeners registered before store exists are attached on creation", () => {
+			const { engine } = setupGameEngine();
+
+			let notified = false;
+			engine.subscribeToShard("world", () => {
+				notified = true;
+			});
+
+			// Store doesn't exist yet — listener is queued
+			expect(engine.shardState("world").syncStatus).toBe("unavailable");
+
+			// State message creates the store — queued listener is attached
+			engine.handleStateMessage({
+				type: "state",
+				channelId: "game",
+				kind: "durable",
+				shards: [
+					{
+						shardId: "world",
+						version: 1,
+						state: { stage: "PLAYING", turn: 0 },
+					},
+				],
+			});
+
+			expect(notified).toBe(true);
+			expect(engine.shardState("world").syncStatus).toBe("latest");
+		});
+
+		test("unsubscribing a queued listener before store exists works", () => {
+			const { engine } = setupGameEngine();
+
+			let notified = false;
+			const unsub = engine.subscribeToShard("world", () => {
+				notified = true;
+			});
+
+			// Unsubscribe before the store is created
+			unsub();
+
+			engine.handleStateMessage({
+				type: "state",
+				channelId: "game",
+				kind: "durable",
+				shards: [
+					{
+						shardId: "world",
+						version: 1,
+						state: { stage: "PLAYING", turn: 0 },
+					},
+				],
+			});
+
+			expect(notified).toBe(false);
+		});
+
+		test("queued listener receives subsequent broadcasts", () => {
+			const { engine } = setupGameEngine();
+
+			let callCount = 0;
+			engine.subscribeToShard("world", () => {
+				callCount += 1;
+			});
+
+			// Create the store
+			engine.handleStateMessage({
+				type: "state",
+				channelId: "game",
+				kind: "durable",
+				shards: [
+					{
+						shardId: "world",
+						version: 1,
+						state: { stage: "PLAYING", turn: 0 },
+					},
+				],
+			});
+
+			// Reset — the initial state message triggers grantAccess + applyBroadcastEntry
+			const countAfterInit = callCount;
+
+			// Broadcast should trigger the listener
+			engine.handleBroadcastMessage({
+				type: "broadcast",
+				channelId: "game",
+				kind: "durable",
+				shards: [
+					{
+						shardId: "world",
+						version: 2,
+						state: { stage: "PLAYING", turn: 1 },
+					},
+				],
+			});
+
+			expect(callCount).toBeGreaterThan(countAfterInit);
+		});
+
 		test("handles multiple shards in one message", () => {
 			const { engine } = setupGameEngine();
 
