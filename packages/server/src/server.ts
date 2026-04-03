@@ -271,6 +271,19 @@ export function createServer<TChannels extends object>(
 				}
 			}
 		});
+
+		transport.onDisconnection((connectionId, reason) => {
+			const pending = pendingConnections.get(connectionId);
+			const actor = pending?.actor ?? { actorId: connectionId };
+			pendingConnections.delete(connectionId);
+
+			// Remove subscriber from all channels
+			for (const ch of channels.values()) {
+				ch.removeSubscriber(connectionId);
+			}
+
+			config.onDisconnect?.(actor, reason);
+		});
 	}
 
 	let serverOpCounter = 0;

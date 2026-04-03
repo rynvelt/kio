@@ -1,18 +1,22 @@
 import { useShardState, useSubmit } from "./hooks";
 
 export function App() {
-	const shard = useShardState("counter", "count");
+	const counter = useShardState("counter", "count");
+	const presence = useShardState("presence", "users");
 	const submit = useSubmit("counter");
 
-	if (shard.syncStatus === "loading") {
-		return <p>Loading...</p>;
+	if (
+		counter.syncStatus === "loading" ||
+		counter.syncStatus === "unavailable"
+	) {
+		return <p>Connecting...</p>;
 	}
 
-	if (shard.syncStatus === "unavailable") {
-		return <p>Unavailable</p>;
-	}
-
-	const { state, pending } = shard;
+	const { state, pending } = counter;
+	const users =
+		presence.syncStatus === "latest" || presence.syncStatus === "stale"
+			? presence.state.connected
+			: [];
 
 	return (
 		<div style={{ fontFamily: "system-ui", padding: "2rem" }}>
@@ -46,6 +50,12 @@ export function App() {
 					Pending: {pending.operationName}
 				</p>
 			)}
+			<div style={{ marginTop: "2rem", color: "#666" }}>
+				<h3>Connected ({users.length})</h3>
+				{users.map((u) => (
+					<div key={u.id}>{u.id}</div>
+				))}
+			</div>
 		</div>
 	);
 }

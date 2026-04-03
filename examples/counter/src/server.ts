@@ -80,14 +80,31 @@ function createBunWsTransport(port: number): {
 async function main() {
 	const adapter = new MemoryStateAdapter();
 	await adapter.compareAndSwap("counter", "count", 0, { value: 0 });
+	// Seed presence with empty connected list
+	await adapter.set("presence", "users", { connected: [] });
 
 	const { transport, start } = createBunWsTransport(4000);
 
-	createServer(appEngine, {
+	const server = createServer(appEngine, {
 		persistence: adapter,
 		transport,
-		defaultSubscriptions: () => [{ channelId: "counter", shardIds: ["count"] }],
+		defaultSubscriptions: () => [
+			{ channelId: "counter", shardIds: ["count"] },
+			{ channelId: "presence", shardIds: ["users"] },
+		],
+		onConnect(actor) {
+			server.submit("presence", "join", { id: actor.actorId });
+		},
+		async onDisconnect(actor) {
+			await server.submit("presence", "leave", { id: actor.actorId });
+			server.broadcastDirtyShards("presence");
+		},
 	});
+
+	// Flush presence broadcasts every second
+	setInterval(() => {
+		server.broadcastDirtyShards("presence");
+	}, 1000);
 
 	start();
 }

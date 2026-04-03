@@ -195,7 +195,7 @@ export class ClientChannelEngine {
 	 * Returns a SubmitResult — never throws.
 	 */
 	async submit(operationName: string, input: unknown): Promise<SubmitResult> {
-		const opId = `${this.channelData.name}:${String(this.opCounter++)}`;
+		const opId = `${this.actorId}:${this.channelData.name}:${String(this.opCounter++)}`;
 		const opDef = this.channelData.operations.get(operationName);
 
 		// Optimistic apply — predict locally before sending to server
@@ -349,7 +349,7 @@ export class ClientChannelEngine {
 		if (!shouldRetry) return false;
 
 		// Retry: new opId, remap pending + in-flight, recompute prediction, resend
-		const newOpId = `${this.channelData.name}:${String(this.opCounter++)}`;
+		const newOpId = `${this.actorId}:${this.channelData.name}:${String(this.opCounter++)}`;
 
 		this.pendingSubmits.delete(oldOpId);
 		this.pendingSubmits.set(newOpId, pending);
