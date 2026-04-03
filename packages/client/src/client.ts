@@ -155,16 +155,13 @@ export function createClient<TChannels extends object>(
 	} as Client<TChannels>;
 }
 
-/**
- * Collect local shard versions from all engines.
- *
- * INCOMPLETE: Always returns empty. When reconnect is implemented,
- * this must iterate each engine's ShardStores and return their
- * current versions so the server can diff and skip up-to-date shards.
- * Without this, every reconnect transfers full state for all shards.
- */
+/** Collect local shard versions from all engines for reconnect handshake */
 function collectLocalVersions(
-	_engines: Map<string, ClientChannelEngine>,
+	engines: Map<string, ClientChannelEngine>,
 ): Record<string, number> {
-	return {};
+	const versions: Record<string, number> = {};
+	for (const eng of engines.values()) {
+		Object.assign(versions, eng.getShardVersions());
+	}
+	return versions;
 }

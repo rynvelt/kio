@@ -207,6 +207,18 @@ export class ClientChannelEngine {
 		return this.sendAndAwait(opId, operationName, input);
 	}
 
+	/** Collect local shard versions for reconnect handshake */
+	getShardVersions(): Record<string, number> {
+		const versions: Record<string, number> = {};
+		for (const [shardId, store] of this.stores) {
+			const v = store.version;
+			if (v !== null) {
+				versions[shardId] = v;
+			}
+		}
+		return versions;
+	}
+
 	get name(): string {
 		return this.channelData.name;
 	}

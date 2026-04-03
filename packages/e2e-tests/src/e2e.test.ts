@@ -220,4 +220,84 @@ describe("End-to-end", () => {
 
 		expect(notified).toBe(true);
 	});
+
+	test("reconnect resumes with local versions, server only sends changed shards", async () => {
+		const adapter = new MemoryStateAdapter();
+		await adapter.compareAndSwap("game", "world", 0, {
+			stage: "PLAYING",
+			turn: 0,
+		});
+		await adapter.compareAndSwap("game", "seat:1", 0, {
+			items: [{ id: "sword", name: "Sword" }],
+		});
+
+		const {
+			client: clientTransport,
+			server: serverTransport,
+			connect,
+			disconnect,
+		} = createDirectTransport();
+
+		const server = createServer(serverEngine, {
+			persistence: adapter,
+			transport: serverTransport,
+			defaultSubscriptions: () => [
+				{ channelId: "game", shardIds: ["world", "seat:1"] },
+			],
+		});
+
+		const client = createClient(clientEngine, {
+			transport: clientTransport,
+		});
+
+		// Initial handshake
+		connect();
+		await new Promise((r) => setTimeout(r, 10));
+
+		expect(client.ready).toBe(true);
+		expect(client.channel("game").shardState("world").state).toEqual({
+			stage: "PLAYING",
+			turn: 0,
+		});
+
+		// Server advances turn while client is connected
+		await server.submit("game", "advanceTurn", {});
+		expect(client.channel("game").shardState("world").state).toEqual({
+			stage: "PLAYING",
+			turn: 1,
+		});
+
+		// Disconnect
+		disconnect();
+		expect(client.ready).toBe(false);
+
+		// Client still has its local state
+		expect(client.channel("game").shardState("world").state).toEqual({
+			stage: "PLAYING",
+			turn: 1,
+		});
+		expect(client.channel("game").shardState("seat:1").state).toEqual({
+			items: [{ id: "sword", name: "Sword" }],
+		});
+
+		// Server advances turn while client is disconnected
+		await server.submit("game", "advanceTurn", {});
+
+		// Reconnect
+		connect();
+		await new Promise((r) => setTimeout(r, 10));
+
+		expect(client.ready).toBe(true);
+
+		// Client received the update that happened during disconnect
+		expect(client.channel("game").shardState("world").state).toEqual({
+			stage: "PLAYING",
+			turn: 2,
+		});
+
+		// seat:1 unchanged — should still have its state (no re-send needed)
+		expect(client.channel("game").shardState("seat:1").state).toEqual({
+			items: [{ id: "sword", name: "Sword" }],
+		});
+	});
 });
