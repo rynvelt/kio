@@ -56,6 +56,7 @@ export type AuthorizeFn = (
 	actor: Actor,
 	operationName: string,
 	channelId: string,
+	shardRefs: readonly ShardRef[],
 ) => boolean | Promise<boolean>;
 
 /** Deduplication tracker */
@@ -125,12 +126,17 @@ export class OperationPipeline {
 		}
 		const validatedInput = "value" in inputResult ? inputResult.value : input;
 
-		// 3. Authorization
+		// 3. Resolve scope
+		const ctx = { actor, channelId: this.channelData.name };
+		const scopeRefs = opDef.scope(validatedInput, ctx);
+
+		// 4. Authorization
 		if (this.config.authorize) {
 			const authorized = await this.config.authorize(
 				actor,
 				operationName,
 				this.channelData.name,
+				scopeRefs,
 			);
 			if (!authorized) {
 				return {
@@ -140,10 +146,6 @@ export class OperationPipeline {
 				};
 			}
 		}
-
-		// 4. Resolve scope
-		const ctx = { actor, channelId: this.channelData.name };
-		const scopeRefs = opDef.scope(validatedInput, ctx);
 
 		// 5. Load scoped shards
 		const loadedShards = await this.stateManager.loadShards(scopeRefs);

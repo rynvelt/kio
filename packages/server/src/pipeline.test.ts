@@ -263,6 +263,69 @@ describe("OperationPipeline", () => {
 				expect(result.code).toBe("UNAUTHORIZED");
 			}
 		});
+
+		test("authorize receives shardRefs from scope", async () => {
+			const { data, adapter, stateManager, actor } = setupGame();
+			await seedSeat(adapter, "1", {
+				items: [{ id: "sword", name: "Sword" }],
+			});
+
+			let receivedShardRefs: readonly { shardType: string; shardId: string }[] =
+				[];
+			const pipeline = new OperationPipeline(data, stateManager, {
+				authorize: (_actor, _op, _ch, shardRefs) => {
+					receivedShardRefs = shardRefs;
+					return true;
+				},
+			});
+
+			await pipeline.submit({
+				operationName: "useItem",
+				input: { seatId: "1", itemId: "sword" },
+				actor,
+				opId: nextOpId(),
+			});
+
+			expect(receivedShardRefs).toHaveLength(1);
+			expect(receivedShardRefs[0]?.shardType).toBe("seat");
+			expect(receivedShardRefs[0]?.shardId).toBe("seat:1");
+		});
+
+		test("authorize can reject based on shardRefs", async () => {
+			const { data, adapter, stateManager, actor } = setupGame();
+			await seedSeat(adapter, "1", { items: [] });
+			await seedSeat(adapter, "2", { items: [] });
+
+			const pipeline = new OperationPipeline(data, stateManager, {
+				authorize: (_actor, _op, _ch, shardRefs) => {
+					// Only allow operations on seat:1
+					return shardRefs.every((ref) => ref.shardId === "seat:1");
+				},
+			});
+
+			const allowed = await pipeline.submit({
+				operationName: "useItem",
+				input: { seatId: "1", itemId: "x" },
+				actor,
+				opId: nextOpId(),
+			});
+			// Rejected by validate (item not found), not by authorize
+			expect(allowed.status).toBe("rejected");
+			if (allowed.status === "rejected") {
+				expect(allowed.code).toBe("ITEM_NOT_FOUND");
+			}
+
+			const denied = await pipeline.submit({
+				operationName: "useItem",
+				input: { seatId: "2", itemId: "x" },
+				actor,
+				opId: nextOpId(),
+			});
+			expect(denied.status).toBe("rejected");
+			if (denied.status === "rejected") {
+				expect(denied.code).toBe("UNAUTHORIZED");
+			}
+		});
 	});
 
 	describe("deduplication", () => {
