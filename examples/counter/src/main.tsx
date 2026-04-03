@@ -4,19 +4,15 @@ import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { setupApp } from "./setup";
 
-async function boot() {
-	const { client } = await setupApp();
+const { client } = setupApp();
 
-	const root = document.getElementById("root");
-	if (!root) throw new Error("Missing #root element");
+const root = document.getElementById("root");
+if (!root) throw new Error("Missing #root element");
 
-	createRoot(root).render(
-		<StrictMode>
-			<KioProvider client={client}>
-				<App />
-			</KioProvider>
-		</StrictMode>,
-	);
-}
-
-boot();
+createRoot(root).render(
+	<StrictMode>
+		<KioProvider client={client}>
+			<App />
+		</KioProvider>
+	</StrictMode>,
+);

@@ -51,6 +51,9 @@ export interface Client<TChannels extends object = object> {
 	readonly ready: boolean;
 }
 
+/** Untyped client — used by framework bindings (React hooks, etc.) */
+export type UntypedClient = Client<Record<string, never>>;
+
 /** Create a client from an engine builder and config */
 export function createClient<TChannels extends object>(
 	engineBuilder: EngineBuilder<TChannels>,
@@ -121,23 +124,30 @@ export function createClient<TChannels extends object>(
 		}
 	});
 
+	const channelHandles = new Map<string, ClientChannel<never>>();
+
 	return {
 		channel(channelName) {
-			const eng = engines.get(channelName);
-			if (!eng) {
-				throw new Error(`Channel "${channelName}" is not registered`);
+			let handle = channelHandles.get(channelName);
+			if (!handle) {
+				const eng = engines.get(channelName);
+				if (!eng) {
+					throw new Error(`Channel "${channelName}" is not registered`);
+				}
+				handle = {
+					submit(operationName, input) {
+						return eng.submit(operationName, input);
+					},
+					shardState(shardId) {
+						return eng.shardState(shardId);
+					},
+					subscribeToShard(shardId, listener) {
+						return eng.subscribeToShard(shardId, listener);
+					},
+				} as ClientChannel<never>;
+				channelHandles.set(channelName, handle);
 			}
-			return {
-				submit(operationName, input) {
-					return eng.submit(operationName, input);
-				},
-				shardState(shardId) {
-					return eng.shardState(shardId);
-				},
-				subscribeToShard(shardId, listener) {
-					return eng.subscribeToShard(shardId, listener);
-				},
-			} as ClientChannel<TChannels[typeof channelName]>;
+			return handle as ClientChannel<TChannels[typeof channelName]>;
 		},
 		get ready() {
 			return isReady;

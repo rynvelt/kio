@@ -35,6 +35,8 @@ export class ClientChannelEngine {
 	private readonly inFlightShards = new Map<string, string>();
 	/** Maps opId → timeout timer for submit timeout */
 	private readonly timeouts = new Map<string, ReturnType<typeof setTimeout>>();
+	/** Listeners registered before the store exists — attached when the store is created */
+	private readonly pendingListeners = new Map<string, Set<() => void>>();
 	private opCounter = 0;
 	private actorId = "";
 
@@ -59,6 +61,15 @@ export class ClientChannelEngine {
 			if (!store) {
 				store = new ShardStore<Record<string, unknown>>(this.channelData.kind);
 				this.stores.set(entry.shardId, store);
+
+				// Attach any listeners that were registered before this store existed
+				const pending = this.pendingListeners.get(entry.shardId);
+				if (pending) {
+					for (const listener of pending) {
+						store.subscribe(listener);
+					}
+					this.pendingListeners.delete(entry.shardId);
+				}
 			}
 			store.grantAccess();
 			store.applyBroadcastEntry(entry);
@@ -137,11 +148,19 @@ export class ClientChannelEngine {
 		this.pendingSubmits.clear();
 	}
 
+	private static readonly UNAVAILABLE_SNAPSHOT: ShardState<
+		Record<string, unknown>
+	> = {
+		syncStatus: "unavailable",
+		state: null,
+		pending: null,
+	};
+
 	/** Get the ShardState snapshot for a shard */
 	shardState(shardId: string): ShardState<Record<string, unknown>> {
 		const store = this.stores.get(shardId);
 		if (!store) {
-			return { syncStatus: "unavailable", state: null, pending: null };
+			return ClientChannelEngine.UNAVAILABLE_SNAPSHOT;
 		}
 		return store.snapshot;
 	}
@@ -149,8 +168,21 @@ export class ClientChannelEngine {
 	/** Subscribe to changes on a specific shard */
 	subscribeToShard(shardId: string, listener: () => void): () => void {
 		const store = this.stores.get(shardId);
-		if (!store) return () => {};
-		return store.subscribe(listener);
+		if (store) {
+			return store.subscribe(listener);
+		}
+
+		// Store doesn't exist yet — queue the listener
+		let pending = this.pendingListeners.get(shardId);
+		if (!pending) {
+			pending = new Set();
+			this.pendingListeners.set(shardId, pending);
+		}
+		pending.add(listener);
+
+		return () => {
+			pending.delete(listener);
+		};
 	}
 
 	/**
