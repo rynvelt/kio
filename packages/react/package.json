@@ -14,7 +14,8 @@
 		"@kio/shared": "workspace:*"
 	},
 	"devDependencies": {
-		"@types/react": "^19"
+		"@types/react": "^19",
+		"valibot": "^1.3.1"
 	},
 	"peerDependencies": {
 		"react": "^18 || ^19"
