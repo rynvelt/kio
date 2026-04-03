@@ -1,6 +1,8 @@
 import type { Client } from "@kio/client";
 import type {
 	ChannelBuilder,
+	EngineBuilder,
+	InferChannels,
 	OpMeta,
 	ShardState,
 	SubmitResult,
@@ -58,7 +60,10 @@ type OperationInput<Ch, OpName extends string> =
  * Returns a `useShardState` hook (for singletons and per-resource shards)
  * and a `useSubmit` hook (typed operation names and inputs).
  */
-export function createKioHooks<TChannels extends object>() {
+export function createKioHooks<
+	TEngine extends EngineBuilder,
+	TChannels extends object = InferChannels<TEngine>,
+>() {
 	/**
 	 * Subscribe to a singleton shard's state.
 	 */

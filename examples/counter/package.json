@@ -1,0 +1,24 @@
+{
+	"name": "@kio/example-counter",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"dev": "vite",
+		"build": "vite build"
+	},
+	"dependencies": {
+		"@kio/client": "workspace:*",
+		"@kio/react": "workspace:*",
+		"@kio/server": "workspace:*",
+		"@kio/shared": "workspace:*",
+		"react": "^19",
+		"react-dom": "^19",
+		"valibot": "^1.3.1"
+	},
+	"devDependencies": {
+		"@types/react": "^19",
+		"@types/react-dom": "^19",
+		"@vitejs/plugin-react": "^4",
+		"vite": "^7"
+	}
+}

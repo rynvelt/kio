@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import type { ShardState } from "@kio/shared";
 import { ShardStore } from "./shard-store";
 
 describe("ShardStore", () => {
@@ -504,6 +505,96 @@ describe("ShardStore", () => {
 
 			store.clearInFlight();
 			expect(callCount).toBe(0);
+		});
+	});
+
+	describe("snapshot referential stability", () => {
+		test("repeated reads return the same object", () => {
+			const store = new ShardStore<{ turn: number }>("durable");
+			store.grantAccess();
+			store.applyBroadcastEntry({
+				shardId: "world",
+				version: 1,
+				state: { turn: 0 },
+			});
+
+			const snap1 = store.snapshot;
+			const snap2 = store.snapshot;
+			expect(snap1).toBe(snap2);
+		});
+
+		test("snapshot changes after broadcast", () => {
+			const store = new ShardStore<{ turn: number }>("durable");
+			store.grantAccess();
+			store.applyBroadcastEntry({
+				shardId: "world",
+				version: 1,
+				state: { turn: 0 },
+			});
+
+			const before = store.snapshot;
+
+			store.applyBroadcastEntry({
+				shardId: "world",
+				version: 2,
+				state: { turn: 1 },
+			});
+
+			const after = store.snapshot;
+			expect(before).not.toBe(after);
+		});
+
+		test("snapshot changes after grantAccess", () => {
+			const store = new ShardStore<{ turn: number }>("durable");
+			const before = store.snapshot;
+			store.grantAccess();
+			const after = store.snapshot;
+			expect(before).not.toBe(after);
+		});
+
+		test("snapshot changes after setOptimistic", () => {
+			const store = new ShardStore<{ turn: number }>("durable");
+			store.grantAccess();
+			store.applyBroadcastEntry({
+				shardId: "world",
+				version: 1,
+				state: { turn: 0 },
+			});
+
+			const before = store.snapshot;
+
+			store.setOptimistic(
+				{ opId: "game:0", operationName: "advanceTurn", input: {} },
+				{ turn: 1 },
+			);
+
+			const after = store.snapshot;
+			expect(before).not.toBe(after);
+		});
+
+		test("snapshot is stable during listener callback", () => {
+			const store = new ShardStore<{ turn: number }>("durable");
+			store.grantAccess();
+			store.applyBroadcastEntry({
+				shardId: "world",
+				version: 1,
+				state: { turn: 0 },
+			});
+
+			const snapsDuringCallback: ShardState<{ turn: number }>[] = [];
+			store.subscribe(() => {
+				snapsDuringCallback.push(store.snapshot);
+			});
+
+			store.applyBroadcastEntry({
+				shardId: "world",
+				version: 2,
+				state: { turn: 1 },
+			});
+
+			// The snapshot seen during the callback is the same as after
+			expect(snapsDuringCallback).toHaveLength(1);
+			expect(snapsDuringCallback[0]).toBe(store.snapshot);
 		});
 	});
 

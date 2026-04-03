@@ -18,7 +18,8 @@ export type {
 	ShardDefs,
 } from "./channel";
 export { channel } from "./channel";
-export type { EngineBuilder } from "./engine";
+export { createDirectTransport } from "./direct-transport";
+export type { EngineBuilder, InferChannels } from "./engine";
 export { engine } from "./engine";
 export type {
 	BlockedCode,

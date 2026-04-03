@@ -16,6 +16,10 @@ export interface EngineBuilder<TChannels extends object = object> {
 	>;
 }
 
+/** Extract the TChannels type from an EngineBuilder */
+export type InferChannels<E> =
+	E extends EngineBuilder<infer TChannels> ? TChannels : never;
+
 // biome-ignore lint/complexity/noBannedTypes: empty object for type accumulation
 type EmptyChannels = {};
 

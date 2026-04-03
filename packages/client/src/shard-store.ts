@@ -29,6 +29,11 @@ export interface InFlight {
  * These have independent lifetimes:
  * - prediction is dropped on any broadcast to this shard
  * - inFlight is cleared on server response (ack/reject), timeout, or disconnect
+ *
+ * Snapshot caching:
+ * The snapshot is rebuilt once per state change (in notify()) and cached.
+ * Repeated reads between changes return the same object reference.
+ * This is required by useSyncExternalStore and benefits any reactive framework.
  */
 export class ShardStore<T extends Record<string, unknown>> {
 	/** State received from the server's last broadcast. null until first broadcast arrives. */
@@ -40,28 +45,20 @@ export class ShardStore<T extends Record<string, unknown>> {
 	private inFlight: InFlight | null = null;
 	/** Predicted state from optimistic apply — dropped on any broadcast */
 	private prediction: { state: T } | null = null;
+	/** Cached snapshot — rebuilt in notify(), returned by snapshot getter */
+	private cachedSnapshot: ShardState<T>;
 
-	constructor(private readonly kind: "durable" | "ephemeral") {}
-
-	/** Consumer-facing snapshot — prediction overrides authoritative when present. */
-	get snapshot(): ShardState<T> {
-		if (!this.accessGranted) {
-			return { syncStatus: "unavailable", state: null, pending: null };
-		}
-		if (!this.received) {
-			return { syncStatus: "loading", state: null, pending: null };
-		}
-		const pending = this.inFlight
-			? {
-					operationName: this.inFlight.operationName,
-					input: this.inFlight.input,
-				}
-			: null;
-		return {
-			syncStatus: "latest",
-			state: this.prediction ? this.prediction.state : this.received.state,
-			pending,
+	constructor(private readonly kind: "durable" | "ephemeral") {
+		this.cachedSnapshot = {
+			syncStatus: "unavailable",
+			state: null,
+			pending: null,
 		};
+	}
+
+	/** Consumer-facing snapshot — referentially stable between state changes. */
+	get snapshot(): ShardState<T> {
+		return this.cachedSnapshot;
 	}
 
 	/** Whether this shard has an in-flight operation (blocks new optimistic submits) */
@@ -178,8 +175,29 @@ export class ShardStore<T extends Record<string, unknown>> {
 	}
 
 	private notify(): void {
+		this.cachedSnapshot = this.buildSnapshot();
 		for (const listener of this.listeners) {
 			listener();
 		}
+	}
+
+	private buildSnapshot(): ShardState<T> {
+		if (!this.accessGranted) {
+			return { syncStatus: "unavailable", state: null, pending: null };
+		}
+		if (!this.received) {
+			return { syncStatus: "loading", state: null, pending: null };
+		}
+		const pending = this.inFlight
+			? {
+					operationName: this.inFlight.operationName,
+					input: this.inFlight.input,
+				}
+			: null;
+		return {
+			syncStatus: "latest",
+			state: this.prediction ? this.prediction.state : this.received.state,
+			pending,
+		};
 	}
 }
