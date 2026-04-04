@@ -1,9 +1,11 @@
+import { useState } from "react";
 import { useShardState, useSubmit } from "./hooks";
 
 export function App() {
 	const counter = useShardState("counter", "count");
 	const presence = useShardState("presence", "users");
 	const submit = useSubmit("counter");
+	const [error, setError] = useState<string | null>(null);
 
 	if (
 		counter.syncStatus === "loading" ||
@@ -18,6 +20,27 @@ export function App() {
 			? presence.state.connected
 			: [];
 
+	async function handleSubmit(op: "increment" | "decrement" | "reset") {
+		setError(null);
+		const result = await submit(op, {});
+		switch (result.status) {
+			case "acknowledged":
+				break;
+			case "rejected":
+				setError(`Rejected: ${result.error.message}`);
+				break;
+			case "timeout":
+				setError("Request timed out");
+				break;
+			case "disconnected":
+				setError("Disconnected from server");
+				break;
+			case "blocked":
+				setError("Operation pending — try again");
+				break;
+		}
+	}
+
 	return (
 		<div style={{ fontFamily: "system-ui", padding: "2rem" }}>
 			<h1>Kio Counter</h1>
@@ -26,21 +49,21 @@ export function App() {
 				<button
 					type="button"
 					disabled={pending !== null}
-					onClick={() => submit("decrement", {})}
+					onClick={() => handleSubmit("decrement")}
 				>
 					-
 				</button>
 				<button
 					type="button"
 					disabled={pending !== null}
-					onClick={() => submit("increment", {})}
+					onClick={() => handleSubmit("increment")}
 				>
 					+
 				</button>
 				<button
 					type="button"
 					disabled={pending !== null}
-					onClick={() => submit("reset", {})}
+					onClick={() => handleSubmit("reset")}
 				>
 					Reset
 				</button>
@@ -50,6 +73,7 @@ export function App() {
 					Pending: {pending.operationName}
 				</p>
 			)}
+			{error && <p style={{ color: "#c00", fontSize: "0.875rem" }}>{error}</p>}
 			<div style={{ marginTop: "2rem", color: "#666" }}>
 				<h3>Connected ({users.length})</h3>
 				{users.map((u) => (

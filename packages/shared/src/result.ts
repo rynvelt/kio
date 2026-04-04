@@ -5,6 +5,8 @@ export type EngineErrorCode =
 	| "DUPLICATE_OPERATION"
 	| "SHARD_NOT_FOUND"
 	| "INVALID_INPUT"
+	| "INVALID_OPERATION"
+	| "INVALID_CHANNEL"
 	| "INTERNAL_ERROR";
 
 /** Client-only block code — no server round-trip happened */

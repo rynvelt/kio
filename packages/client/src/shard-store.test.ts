@@ -375,7 +375,7 @@ describe("ShardStore", () => {
 				shardId: "world",
 				version: 2,
 				state: { turn: 99 },
-				causedBy: { opId: "other:0", operation: "x", actor: "bob" },
+				causedBy: { opId: "other:0", operation: "x", actorId: "bob" },
 			});
 
 			const snap = store.snapshot;
@@ -402,7 +402,11 @@ describe("ShardStore", () => {
 				shardId: "world",
 				version: 2,
 				state: { turn: 1 },
-				causedBy: { opId: "game:0", operation: "advanceTurn", actor: "alice" },
+				causedBy: {
+					opId: "game:0",
+					operation: "advanceTurn",
+					actorId: "alice",
+				},
 			});
 
 			const snap = store.snapshot;

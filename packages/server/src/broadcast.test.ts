@@ -21,7 +21,7 @@ const testPatches: Patch[] = [{ op: "replace", path: ["turn"], value: 1 }];
 const testCausedBy = {
 	opId: "game:0",
 	operation: "advanceTurn",
-	actor: "player:alice",
+	actorId: "player:alice",
 };
 
 function broadcastPatches(
@@ -87,7 +87,7 @@ describe("BroadcastManager — broadcastPatches", () => {
 		expectToBeDefined(entry);
 		expect(entry.causedBy?.opId).toBe("game:0");
 		expect(entry.causedBy?.operation).toBe("advanceTurn");
-		expect(entry.causedBy?.actor).toBe("player:alice");
+		expect(entry.causedBy?.actorId).toBe("player:alice");
 	});
 
 	test("removed subscriber receives nothing", () => {

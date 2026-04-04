@@ -4,7 +4,7 @@ import type { Patch } from "immer";
 export interface CausedBy {
 	readonly opId: string;
 	readonly operation: string;
-	readonly actor: string;
+	readonly actorId: string;
 }
 
 /** A single shard entry in a broadcast message */

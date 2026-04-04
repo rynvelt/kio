@@ -120,7 +120,7 @@ describe("ChannelEngine — durable, autoBroadcast: true", () => {
 		expectToBeDefined(entry.causedBy);
 		expect(entry.causedBy.opId).toBeDefined();
 		expect(entry.causedBy.operation).toBe("advanceTurn");
-		expect(entry.causedBy.actor).toBe("player:alice");
+		expect(entry.causedBy.actorId).toBe("player:alice");
 	});
 
 	test("failed submission does not broadcast", async () => {

@@ -453,7 +453,7 @@ describe("ClientChannelEngine", () => {
 						shardId: "world",
 						version: 2,
 						state: { stage: "PLAYING", turn: 99 },
-						causedBy: { opId: "other:0", operation: "x", actor: "bob" },
+						causedBy: { opId: "other:0", operation: "x", actorId: "bob" },
 					},
 				],
 			});
@@ -483,7 +483,7 @@ describe("ClientChannelEngine", () => {
 						shardId: "world",
 						version: 2,
 						state: { stage: "PLAYING", turn: 1 },
-						causedBy: { opId, operation: "advanceTurn", actor: "alice" },
+						causedBy: { opId, operation: "advanceTurn", actorId: "alice" },
 					},
 				],
 			});
@@ -543,7 +543,7 @@ describe("ClientChannelEngine", () => {
 						causedBy: {
 							opId: opId1,
 							operation: "advanceTurn",
-							actor: "alice",
+							actorId: "alice",
 						},
 					},
 				],

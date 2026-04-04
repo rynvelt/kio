@@ -67,7 +67,7 @@ export class ChannelEngine {
 			const causedBy: CausedBy = {
 				opId: result.opId,
 				operation: result.operationName,
-				actor: submission.actor.actorId,
+				actorId: submission.actor.actorId,
 			};
 
 			switch (this.broadcastMode) {
