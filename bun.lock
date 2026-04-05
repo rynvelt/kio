@@ -32,6 +32,8 @@
         "@kio/react": "workspace:*",
         "@kio/server": "workspace:*",
         "@kio/shared": "workspace:*",
+        "@kio/transport-bun-ws": "workspace:*",
+        "@kio/transport-ws": "workspace:*",
         "react": "^19",
         "react-dom": "^19",
         "valibot": "^1.3.1",
@@ -117,6 +119,20 @@
         "@standard-schema/spec": "^1.1.0",
         "immer": "^11.1.4",
         "valibot": "^1.3.1",
+      },
+    },
+    "packages/transport-bun-ws": {
+      "name": "@kio/transport-bun-ws",
+      "version": "0.0.1",
+      "dependencies": {
+        "@kio/shared": "workspace:*",
+      },
+    },
+    "packages/transport-ws": {
+      "name": "@kio/transport-ws",
+      "version": "0.0.1",
+      "dependencies": {
+        "@kio/shared": "workspace:*",
       },
     },
   },
@@ -368,6 +384,10 @@
     "@kio/server": ["@kio/server@workspace:packages/server"],
 
     "@kio/shared": ["@kio/shared@workspace:packages/shared"],
+
+    "@kio/transport-bun-ws": ["@kio/transport-bun-ws@workspace:packages/transport-bun-ws"],
+
+    "@kio/transport-ws": ["@kio/transport-ws@workspace:packages/transport-ws"],
 
     "@kurkle/color": ["@kurkle/color@0.3.4", "", {}, "sha512-M5UknZPHRu3DEDWoipU6sE8PdkZ6Z/S+v4dD+Ke8IaNlpdSQah50lz1KtcFBa2vsdOnwbbnxJwVM4wty6udA5w=="],
 

@@ -13,6 +13,8 @@
 		"@kio/react": "workspace:*",
 		"@kio/server": "workspace:*",
 		"@kio/shared": "workspace:*",
+		"@kio/transport-bun-ws": "workspace:*",
+		"@kio/transport-ws": "workspace:*",
 		"react": "^19",
 		"react-dom": "^19",
 		"valibot": "^1.3.1"

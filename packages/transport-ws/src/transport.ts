@@ -4,21 +4,40 @@ import type {
 	ServerMessage,
 } from "@kio/shared";
 
+export interface WsTransportOptions {
+	/** Factory that creates a new WebSocket connection */
+	readonly connect: () => WebSocket;
+	/** Delay in ms before reconnecting after a disconnect. Default: 1000 */
+	readonly reconnectDelayMs?: number;
+}
+
 /**
- * Browser WebSocket client transport for Kio with auto-reconnect.
- * Inline implementation — not yet a package.
+ * Browser WebSocket client transport for Kio.
+ *
+ * The consumer provides a connect() factory that creates WebSocket instances.
+ * The transport handles the reconnect lifecycle — on disconnect, it calls
+ * connect() again after the configured delay.
+ *
+ * Usage:
+ * ```ts
+ * const transport = createWsTransport({
+ *   connect: () => new WebSocket("ws://localhost:4000"),
+ * });
+ * const client = createClient(engine, { transport });
+ * ```
  */
-export function createWsClientTransport(
-	url: string,
-	reconnectDelayMs = 1000,
+export function createWsTransport(
+	options: WsTransportOptions,
 ): ClientTransport {
+	const reconnectDelay = options.reconnectDelayMs ?? 1000;
+
 	let messageHandler: ((message: ServerMessage) => void) | null = null;
 	let connectedHandler: (() => void) | null = null;
 	let disconnectedHandler: ((reason: string) => void) | null = null;
 	let ws: WebSocket | null = null;
 
 	function connect() {
-		ws = new WebSocket(url);
+		ws = options.connect();
 
 		ws.onopen = () => {
 			connectedHandler?.();
@@ -31,8 +50,7 @@ export function createWsClientTransport(
 
 		ws.onclose = (event) => {
 			disconnectedHandler?.(event.reason || "connection closed");
-			// Auto-reconnect after delay
-			setTimeout(connect, reconnectDelayMs);
+			setTimeout(connect, reconnectDelay);
 		};
 	}
 

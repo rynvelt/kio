@@ -1,9 +1,11 @@
 import { createClient } from "@kio/client";
+import { createWsTransport } from "@kio/transport-ws";
 import { appEngine } from "./schema";
-import { createWsClientTransport } from "./ws-client-transport";
 
 export function setupApp() {
-	const transport = createWsClientTransport("ws://localhost:4000");
+	const transport = createWsTransport({
+		connect: () => new WebSocket("ws://localhost:4000"),
+	});
 
 	const client = createClient(appEngine, { transport });
 
