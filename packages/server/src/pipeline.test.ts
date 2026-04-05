@@ -575,6 +575,64 @@ describe("OperationPipeline", () => {
 			}
 		});
 
+		test("scope throwing returns INTERNAL_ERROR", async () => {
+			const ch = channel
+				.durable("game")
+				.shard("world", v.object({ turn: v.number() }))
+				.operation("crashingScope", {
+					execution: "optimistic",
+					input: v.object({}),
+					scope: () => {
+						throw new Error("scope bug");
+					},
+					apply() {},
+				});
+
+			const data = ch["~data"];
+			const adapter = new MemoryStateAdapter();
+			const stateManager = new ShardStateManager(
+				"game",
+				data.shardDefs,
+				adapter,
+			);
+
+			const pipeline = new OperationPipeline(data, stateManager);
+			const result = await pipeline.submit({
+				operationName: "crashingScope",
+				input: {},
+				actor: { actorId: "alice" },
+				opId: nextOpId(),
+			});
+
+			expect(result.status).toBe("rejected");
+			if (result.status === "rejected") {
+				expect(result.code).toBe("INTERNAL_ERROR");
+			}
+		});
+
+		test("authorize throwing returns INTERNAL_ERROR", async () => {
+			const { data, adapter, stateManager, actor } = setupGame();
+			await seedWorld(adapter, { stage: "PLAYING", turn: 0 });
+
+			const pipeline = new OperationPipeline(data, stateManager, {
+				authorize: () => {
+					throw new Error("authorize bug");
+				},
+			});
+
+			const result = await pipeline.submit({
+				operationName: "advanceTurn",
+				input: {},
+				actor,
+				opId: nextOpId(),
+			});
+
+			expect(result.status).toBe("rejected");
+			if (result.status === "rejected") {
+				expect(result.code).toBe("INTERNAL_ERROR");
+			}
+		});
+
 		test("compute throwing returns INTERNAL_ERROR", async () => {
 			const ch = channel
 				.durable("game")

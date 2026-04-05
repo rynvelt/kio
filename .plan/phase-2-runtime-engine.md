@@ -1,16 +1,11 @@
 # Phase 2: Runtime Server Engine
 
-## Status: Steps 1-4 complete, step 5 deferred
+## Status: Complete
 
 ## Goal
 
 Make the operation pipeline actually run: submit → validate → compute → apply → persist → broadcast.
 Tested with in-memory transport and in-memory persistence.
-
-## Prerequisites
-
-- Immer composed root approach verified (done)
-- Consumer-facing types validated (done)
 
 ## Steps
 
@@ -35,12 +30,15 @@ Error boundaries catch apply/compute exceptions → INTERNAL_ERROR.
 `onOperationApplied()` — auto channels send patches, manual channels mark dirty.
 `broadcastDirtyShards()` — flush full state to subscribers.
 
-### 5. Server-as-actor — deferred to phase 3
+### 5. Server-as-actor ✅
 
-## Open items from review (phase 3)
+Implemented in phase 3. Server submits via `server.submit()` with generated opIds.
+`versionChecked: false` operations succeed unconditionally.
 
-- **ChannelEngine** — higher-level orchestrator composing pipeline + broadcast + state manager
-- **VERSION_CONFLICT fresh state** — rejection should include current shard state for canRetry
-- **Server-as-actor retry** — submit with maxRetries config
-- **Ephemeral versioning** — entries should not carry version numbers per vision doc
-- **broadcastMode: "full"** — declared but unused; should send full state when configured
+## Open items (resolved)
+
+- **ChannelEngine** ✅ — orchestrates pipeline + broadcast + state manager
+- **VERSION_CONFLICT fresh state** ✅ — rejection includes current shard state
+- **Server-as-actor retry** — deferred; `versionChecked: false` covers most cases
+- **Ephemeral versioning** ✅ — decided to keep version counters (diverges from vision, documented in phase 3 plan)
+- **broadcastMode: "full"** ✅ — sends full state when configured

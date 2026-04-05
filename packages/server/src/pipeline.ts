@@ -93,6 +93,18 @@ export class OperationPipeline {
 	) {}
 
 	async submit(submission: Submission): Promise<PipelineResult> {
+		try {
+			return await this.run(submission);
+		} catch {
+			return {
+				status: "rejected",
+				code: "INTERNAL_ERROR",
+				message: "An unexpected error occurred",
+			};
+		}
+	}
+
+	private async run(submission: Submission): Promise<PipelineResult> {
 		const { operationName, input, actor, opId } = submission;
 
 		const opDef = this.channelData.operations.get(operationName);
