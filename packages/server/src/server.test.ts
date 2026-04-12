@@ -123,7 +123,7 @@ describe("createServer", () => {
 		}
 	});
 
-	test("authorize hook is wired to all channels", async () => {
+	test("server-as-actor skips authorize", async () => {
 		const adapter = new MemoryStateAdapter();
 		await adapter.compareAndSwap("game", "world", 0, {
 			stage: "PLAYING",
@@ -135,11 +135,9 @@ describe("createServer", () => {
 			authorize: () => false,
 		});
 
+		// Server-as-actor should succeed even though authorize returns false
 		const result = await server.submit("game", "advanceTurn", {});
-		expect(result.status).toBe("rejected");
-		if (result.status === "rejected") {
-			expect(result.code).toBe("UNAUTHORIZED");
-		}
+		expect(result.status).toBe("acknowledged");
 	});
 
 	test("removeSubscriber stops broadcasts", async () => {
@@ -203,14 +201,28 @@ describe("createServer", () => {
 				turn: 0,
 			});
 
-			const { client, server: serverTransport } = createDirectTransport();
+			const {
+				client,
+				server: serverTransport,
+				connect,
+			} = createDirectTransport();
 			createServer(setupServerEngine(), {
 				persistence: adapter,
 				transport: serverTransport,
+				defaultSubscriptions: () => [
+					{ channelId: "game", shardIds: ["world"] },
+				],
 			});
 
 			const received: ServerMessage[] = [];
 			client.onMessage((msg) => received.push(msg));
+
+			// Complete handshake
+			connect({ actorId: "test-player" });
+			await new Promise((r) => setTimeout(r, 10));
+			client.send({ type: "versions", shards: {} });
+
+			const handshakeCount = received.length;
 
 			client.send({
 				type: "submit",
@@ -220,13 +232,11 @@ describe("createServer", () => {
 				opId: "op-1",
 			});
 
-			// Wait for async pipeline
 			await new Promise((r) => setTimeout(r, 10));
 
-			expect(received).toHaveLength(1);
-			const ack = received[0];
+			const newMessages = received.slice(handshakeCount);
+			const ack = newMessages.find((m) => m.type === "acknowledge");
 			expectToBeDefined(ack);
-			expect(ack.type).toBe("acknowledge");
 			if (ack.type === "acknowledge") {
 				expect(ack.opId).toBe("op-1");
 			}

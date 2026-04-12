@@ -12,8 +12,6 @@ export interface Actor {
 	readonly actorId: string;
 }
 
-export const KIO_SERVER_ACTOR: Actor = { actorId: "__kio:server__" };
-
 /** Submission from a client or server-as-actor */
 export interface Submission {
 	readonly operationName: string;
@@ -82,6 +80,8 @@ export class MemoryDeduplicationTracker implements DeduplicationTracker {
 export interface PipelineConfig {
 	readonly authorize?: AuthorizeFn;
 	readonly deduplication?: DeduplicationTracker;
+	/** If set, submissions from this actorId skip validate and authorize */
+	readonly serverActorId?: string;
 }
 
 /** Runs the server-side operation pipeline */
@@ -146,8 +146,12 @@ export class OperationPipeline {
 		const ctx = { actor, channelId: this.channelData.name };
 		const scopeRefs = opDef.scope(validatedInput, ctx);
 
-		// 4. Authorization
-		if (this.config.authorize) {
+		const isServerActor =
+			this.config.serverActorId !== undefined &&
+			actor.actorId === this.config.serverActorId;
+
+		// 4. Authorization (skipped for server-as-actor)
+		if (this.config.authorize && !isServerActor) {
 			const authorized = await this.config.authorize(
 				actor,
 				operationName,
@@ -167,9 +171,9 @@ export class OperationPipeline {
 		const loadedShards = await this.stateManager.loadShards(scopeRefs);
 		const composedRoot = this.stateManager.buildComposedRoot(loadedShards);
 
-		// 6. Validate (server impl)
+		// 6. Validate (server impl, skipped for server-as-actor)
 		const serverImpl = this.channelData.serverImpls.get(operationName);
-		if (serverImpl?.validate) {
+		if (serverImpl?.validate && !isServerActor) {
 			const rejection = this.runValidate(
 				serverImpl,
 				composedRoot,

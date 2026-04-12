@@ -1,4 +1,5 @@
 import type {
+	BaseActor,
 	ChannelBuilder,
 	EngineBuilder,
 	ServerTransport,
@@ -6,8 +7,7 @@ import type {
 } from "@kio/shared";
 import { ChannelEngine } from "./channel-engine";
 import type { StateAdapter } from "./persistence";
-import type { Actor, AuthorizeFn, PipelineResult } from "./pipeline";
-import { KIO_SERVER_ACTOR } from "./pipeline";
+import type { AuthorizeFn, PipelineResult } from "./pipeline";
 
 /** Subscription entry: which channel and which shards */
 export interface SubscriptionRef {
@@ -15,14 +15,14 @@ export interface SubscriptionRef {
 	readonly shardIds: readonly string[];
 }
 
-/** Configuration for createServer */
-export interface ServerConfig {
+/** Configuration for createServer — TActor is inferred from the engine builder */
+export interface ServerConfig<TActor extends BaseActor = BaseActor> {
 	readonly persistence: StateAdapter;
 	readonly transport?: ServerTransport;
 	readonly authorize?: AuthorizeFn;
-	readonly defaultSubscriptions?: (actor: Actor) => readonly SubscriptionRef[];
-	readonly onConnect?: (actor: Actor) => void;
-	readonly onDisconnect?: (actor: Actor, reason: string) => void;
+	readonly defaultSubscriptions?: (actor: TActor) => readonly SubscriptionRef[];
+	readonly onConnect?: (actor: TActor) => void;
+	readonly onDisconnect?: (actor: TActor, reason: string) => void;
 }
 
 /** Extract operation names from a ChannelBuilder's Ops type */
@@ -90,21 +90,32 @@ export interface Server<TChannels extends object = object> {
 }
 
 /** Create a server from an engine builder and config */
-export function createServer<TChannels extends object>(
-	engineBuilder: EngineBuilder<TChannels>,
-	config: ServerConfig,
+export function createServer<
+	TChannels extends object,
+	TActor extends BaseActor = BaseActor,
+>(
+	engineBuilder: EngineBuilder<TChannels, TActor>,
+	config: ServerConfig<TActor>,
 ): Server<TChannels> {
 	const channels = new Map<string, ChannelEngine>();
 	const { transport } = config;
+	const actorSchema = engineBuilder["~actorSchema"];
+	const serverActor: BaseActor = engineBuilder["~serverActor"] ?? {
+		actorId: "__kio:server__",
+	};
 
 	for (const [name, channelData] of engineBuilder["~channels"]) {
 		channels.set(
 			name,
 			new ChannelEngine(channelData, config.persistence, {
 				authorize: config.authorize,
+				serverActorId: serverActor.actorId,
 			}),
 		);
 	}
+
+	// Actor storage per connection
+	const connectionActors = new Map<string, TActor>();
 
 	function getChannelOrThrow(channelName: string): ChannelEngine {
 		const ch = channels.get(channelName);
@@ -129,11 +140,24 @@ export function createServer<TChannels extends object>(
 		};
 	}
 
+	/** Validate raw actor from transport against the actor schema */
+	async function validateActor(rawActor: unknown): Promise<TActor | null> {
+		if (!actorSchema) {
+			// No schema — accept as-is (backward compat with engine() without defineApp)
+			return rawActor as TActor;
+		}
+		const result = await actorSchema["~standard"].validate(rawActor);
+		if ("issues" in result && result.issues) {
+			return null;
+		}
+		return ("value" in result ? result.value : rawActor) as TActor;
+	}
+
 	// Per-connection state between handshake steps
 	const pendingConnections = new Map<
 		string,
 		{
-			actor: Actor;
+			actor: TActor;
 			channelStates: Array<{
 				channelId: string;
 				kind: "durable" | "ephemeral";
@@ -144,10 +168,24 @@ export function createServer<TChannels extends object>(
 
 	/**
 	 * Handshake step 1: transport signals client connected.
-	 * Server determines subscriptions, loads shard states, sends server versions.
+	 * Validates actor, determines subscriptions, loads shard states, sends welcome.
 	 */
-	async function handleConnection(connectionId: string): Promise<void> {
-		const actor: Actor = { actorId: connectionId };
+	async function handleConnection(
+		connectionId: string,
+		rawActor: unknown,
+	): Promise<void> {
+		const actor = await validateActor(rawActor);
+		if (!actor) {
+			transport?.send(connectionId, {
+				type: "error",
+				code: "INVALID_ACTOR",
+				message: "Actor validation failed",
+			});
+			transport?.close(connectionId);
+			return;
+		}
+
+		connectionActors.set(connectionId, actor);
 		const subscriptions = config.defaultSubscriptions?.(actor) ?? [];
 
 		const channelStates: Array<{
@@ -226,8 +264,8 @@ export function createServer<TChannels extends object>(
 
 	// Wire transport
 	if (transport) {
-		transport.onConnection(async (connectionId) => {
-			await handleConnection(connectionId);
+		transport.onConnection(async (connectionId, rawActor) => {
+			await handleConnection(connectionId, rawActor);
 		});
 
 		transport.onMessage(async (connectionId, message) => {
@@ -248,10 +286,21 @@ export function createServer<TChannels extends object>(
 					return;
 				}
 
+				const actor = connectionActors.get(connectionId);
+				if (!actor) {
+					transport.send(connectionId, {
+						type: "reject",
+						opId: message.opId,
+						code: "INTERNAL_ERROR",
+						message: "Connection has no associated actor",
+					});
+					return;
+				}
+
 				const result = await ch.submit({
 					operationName: message.operationName,
 					input: message.input,
-					actor: { actorId: connectionId },
+					actor,
 					opId: message.opId,
 				});
 
@@ -273,8 +322,8 @@ export function createServer<TChannels extends object>(
 		});
 
 		transport.onDisconnection((connectionId, reason) => {
-			const pending = pendingConnections.get(connectionId);
-			const actor = pending?.actor ?? { actorId: connectionId };
+			const actor = connectionActors.get(connectionId);
+			connectionActors.delete(connectionId);
 			pendingConnections.delete(connectionId);
 
 			// Remove subscriber from all channels
@@ -282,7 +331,9 @@ export function createServer<TChannels extends object>(
 				ch.removeSubscriber(connectionId);
 			}
 
-			config.onDisconnect?.(actor, reason);
+			if (actor) {
+				config.onDisconnect?.(actor, reason);
+			}
 		});
 	}
 
@@ -295,7 +346,7 @@ export function createServer<TChannels extends object>(
 			return ch.submit({
 				operationName,
 				input,
-				actor: KIO_SERVER_ACTOR,
+				actor: serverActor,
 				opId,
 			});
 		},

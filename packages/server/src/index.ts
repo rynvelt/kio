@@ -11,6 +11,5 @@ export type {
 	PipelineResult,
 	Submission,
 } from "./pipeline";
-export { KIO_SERVER_ACTOR } from "./pipeline";
 export type { Server, ServerConfig, SubscriptionRef } from "./server";
 export { createServer } from "./server";

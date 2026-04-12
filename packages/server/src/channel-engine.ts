@@ -15,6 +15,7 @@ import { ShardStateManager } from "./shard-state-manager";
 export interface ChannelEngineConfig {
 	readonly authorize?: AuthorizeFn;
 	readonly deduplication?: DeduplicationTracker;
+	readonly serverActorId?: string;
 }
 
 /**
@@ -46,6 +47,7 @@ export class ChannelEngine {
 		this.pipeline = new OperationPipeline(channelData, this.stateManager, {
 			authorize: config.authorize,
 			deduplication: config.deduplication ?? new MemoryDeduplicationTracker(),
+			serverActorId: config.serverActorId,
 		});
 
 		this.broadcastManager = new BroadcastManager(
