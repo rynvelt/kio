@@ -568,3 +568,38 @@ _serverForTypes.submit("presence", "setOnline", { playerId: 123 });
 
 // @ts-expect-error: missing required field for setOnline
 _serverForTypes.submit("presence", "setOnline", {});
+
+// ── 27. defineApp creates pre-typed builders ────────────────────────
+
+import { defineApp, type InferActor } from "@kio/shared";
+
+const kio = defineApp({
+	actor: v.object({ actorId: v.string(), name: v.string() }),
+	serverActor: { actorId: "__kio:server__", name: "System" },
+});
+
+// InferActor extracts the actor type from an engine builder
+const _kioEngine = kio.engine();
+type _KioActor = InferActor<typeof _kioEngine>;
+type _27a = Expect<Equal<_KioActor, { actorId: string; name: string }>>;
+
+defineApp({
+	actor: v.object({ actorId: v.string(), name: v.string() }),
+	// @ts-expect-error: serverActor missing "name" field
+	serverActor: { actorId: "__kio:server__" },
+});
+
+// Channels built from kio work normally
+const _kioChannel = kio.channel
+	.durable("test")
+	.shard("world", v.object({ turn: v.number() }))
+	.operation("tick", {
+		execution: "optimistic",
+		input: v.object({}),
+		scope: () => [kio.shard.ref("world")],
+		apply(shards) {
+			shards.world.turn += 1;
+		},
+	});
+
+const _kioAppEngine = kio.engine().channel(_kioChannel);
