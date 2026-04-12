@@ -171,15 +171,53 @@ No `authenticate` hook in Kio. The consumer uses their own auth stack.
 - Counter example: `upgrade()` passes actor, client receives full actor
 - Server tests: actor in submit, handshake, disconnect
 
-## Open questions
+## Runtime behavior
 
-None — design is complete. Implementation can proceed.
+### Actor validation on connection
+
+When `ServerTransport.onConnection(connectionId, rawActor)` fires:
+1. Server validates `rawActor` against the actor schema (StandardSchema runtime validation)
+2. If valid → store in `Map<connectionId, TActor>`, proceed with handshake
+3. If invalid → send `{ type: "error", code: "INVALID_ACTOR", message: "..." }` over WebSocket, close the connection via `ServerTransport.close(connectionId)`
+
+Requires adding `close(connectionId: string): void` to `ServerTransport` interface.
+
+### serverActor validation
+
+- **Compile time:** `defineApp` types `serverActor` as `TActor` — TypeScript catches shape mismatches
+- **Runtime:** `createServer` validates `serverActor` against the actor schema at startup. Throws if invalid. This catches dynamic/edge cases the type system misses.
+
+### WelcomeMessage carries full actor
+
+The actor object is serialized to JSON in the WelcomeMessage. The client stores and uses the deserialized object as `ctx.actor`.
+
+**Contract:** The actor must be JSON-serializable (strings, numbers, booleans, arrays, plain objects). Non-serializable types (Date, Map, Set) will break on the wire. This is documented, not enforced — the serializer can be swapped later to support richer types.
+
+### Client actor storage
+
+The client receives the full actor in the WelcomeMessage, stores it on the `ClientChannelEngine`, and passes it to `buildCtx()`. The stored object is the deserialized JSON — structurally identical to what the server sent.
+
+### Connection-to-actor mapping lifecycle
+
+- **Populated:** `onConnection` fires, actor validated, stored in `Map<connectionId, TActor>`
+- **Cleaned up:** `onDisconnection` fires, entry removed from map
+- **Reconnect:** old entry removed by disconnect, new entry added by new connection. Clean lifecycle.
+
+### Multiple connections with same actorId
+
+Allowed by default. Two tabs with the same player create two connections, both subscribed to the same shards, both receive broadcasts. This is correct behavior — the framework tracks connections, not unique actors.
+
+If the consumer wants "one connection per player" semantics (e.g., kick old tab), they implement it in `onConnect` by tracking connections per actorId and calling `ServerTransport.close()` on the old one. The framework provides the tools but doesn't enforce policy.
+
+### Server-as-actor submissions
+
+The pipeline skips `validate` and `authorize` for submissions where `actor.actorId === serverActor.actorId`. The server is trusted. `ctx.actor` in `apply` is the `serverActor` value from `defineApp`.
 
 ## Commit plan
 
 1. **defineApp + engine TActor** — new `defineApp()`, `EngineBuilder` gains TActor, `InferActor`. Non-breaking (old API still works).
 2. **Channel builder TActor** — thread TActor through `ChannelBuilder`, operation configs, `OperationContext`. Breaking for type inference.
-3. **Transport actor** — `ServerTransport.onConnection` accepts actor, `upgrade()` accepts actor, `WelcomeMessage` carries full actor. Breaking.
+3. **Transport actor** — `ServerTransport.onConnection` accepts actor, add `close()` method, `upgrade()` accepts actor, `WelcomeMessage` carries full actor. Breaking.
 4. **Server actor management** — validate actor on connect, store per connection, type config callbacks, skip validate/authorize for server actor. Breaking.
 5. **Client actor** — store full actor, use in ctx. Non-breaking.
 6. **Update tests and examples** — all tests pass with new API.
