@@ -603,3 +603,45 @@ const _kioChannel = kio.channel
 	});
 
 const _kioAppEngine = kio.engine().channel(_kioChannel);
+
+// ── 28. defineApp ctx.actor carries full actor type ─────────────────
+
+kio.channel
+	.durable("typed-actor")
+	.shard("world", v.object({ turn: v.number() }))
+	.operation("move", {
+		execution: "optimistic",
+		input: v.object({}),
+		scope: (_input, ctx) => {
+			// ctx.actor.name is typed — this is the key test
+			const _name: string = ctx.actor.name;
+			return [kio.shard.ref("world")];
+		},
+		apply(_shards, _input, _sr, ctx) {
+			const _name: string = ctx.actor.name;
+			const _id: string = ctx.actor.actorId;
+		},
+	})
+	.serverImpl("move", {
+		validate(_shards, _input, ctx) {
+			const _name: string = ctx.actor.name;
+		},
+	});
+
+// ── 29. Standalone channel uses default actor (backward compat) ─────
+
+channel
+	.durable("default-actor")
+	.shard("world", v.object({ turn: v.number() }))
+	.operation("tick", {
+		execution: "optimistic",
+		input: v.object({}),
+		scope: (_input, ctx) => {
+			// Default actor only has actorId
+			const _id: string = ctx.actor.actorId;
+			// @ts-expect-error: "name" does not exist on default actor
+			ctx.actor.name;
+			return [shard.ref("world")];
+		},
+		apply() {},
+	});

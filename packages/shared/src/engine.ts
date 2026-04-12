@@ -21,9 +21,9 @@ export interface EngineBuilder<
 		D extends ShardDefs,
 		Ops extends object,
 	>(
-		ch: ChannelBuilder<Kind, Name, D, Ops>,
+		ch: ChannelBuilder<Kind, Name, D, Ops, TActor>,
 	): EngineBuilder<
-		TChannels & Record<Name, ChannelBuilder<Kind, Name, D, Ops>>,
+		TChannels & Record<Name, ChannelBuilder<Kind, Name, D, Ops, TActor>>,
 		TActor
 	>;
 }

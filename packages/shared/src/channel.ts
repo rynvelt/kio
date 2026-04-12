@@ -129,6 +129,7 @@ interface OptimisticOperationConfig<
 	D extends ShardDefs,
 	TInput,
 	TScopeNames extends string,
+	TActor = { actorId: string },
 > {
 	readonly execution: "optimistic";
 	readonly versionChecked?: boolean;
@@ -136,35 +137,43 @@ interface OptimisticOperationConfig<
 	readonly input: StandardSchemaV1<TInput>;
 	readonly scope: (
 		input: TInput,
-		ctx: OperationContext,
+		ctx: OperationContext<TActor>,
 	) => readonly ShardRef<TScopeNames>[];
 	readonly apply: (
 		shards: ScopedShardAccessors<D, TScopeNames>,
 		input: TInput,
 		serverResult: undefined,
-		ctx: OperationContext,
+		ctx: OperationContext<TActor>,
 	) => void;
 }
 
-interface ConfirmedOperationConfig<TInput, TScopeNames extends string> {
+interface ConfirmedOperationConfig<
+	TInput,
+	TScopeNames extends string,
+	TActor = { actorId: string },
+> {
 	readonly execution: "confirmed";
 	readonly versionChecked?: boolean;
 	readonly deduplicate?: boolean;
 	readonly input: StandardSchemaV1<TInput>;
 	readonly scope: (
 		input: TInput,
-		ctx: OperationContext,
+		ctx: OperationContext<TActor>,
 	) => readonly ShardRef<TScopeNames>[];
 }
 
-interface ComputedOperationConfig<TInput, TScopeNames extends string> {
+interface ComputedOperationConfig<
+	TInput,
+	TScopeNames extends string,
+	TActor = { actorId: string },
+> {
 	readonly execution: "computed";
 	readonly versionChecked?: boolean;
 	readonly deduplicate?: boolean;
 	readonly input: StandardSchemaV1<TInput>;
 	readonly scope: (
 		input: TInput,
-		ctx: OperationContext,
+		ctx: OperationContext<TActor>,
 	) => readonly ShardRef<TScopeNames>[];
 }
 
@@ -188,24 +197,39 @@ type RejectFn<TErrors extends string> = (
 	message: string,
 ) => never;
 
-type ValidateFn<D extends ShardDefs, TInput, TErrors extends string> = (
+type ValidateFn<
+	D extends ShardDefs,
+	TInput,
+	TErrors extends string,
+	TActor = { actorId: string },
+> = (
 	shards: ShardAccessors<D>,
 	input: TInput,
-	ctx: OperationContext,
+	ctx: OperationContext<TActor>,
 	tools: { readonly reject: RejectFn<TErrors> },
 ) => void;
 
-type ApplyFn<D extends ShardDefs, TInput, TServerResult> = (
+type ApplyFn<
+	D extends ShardDefs,
+	TInput,
+	TServerResult,
+	TActor = { actorId: string },
+> = (
 	shards: ShardAccessors<D>,
 	input: TInput,
 	serverResult: TServerResult,
-	ctx: OperationContext,
+	ctx: OperationContext<TActor>,
 ) => void;
 
-type ComputeFn<D extends ShardDefs, TInput, TServerResult> = (
+type ComputeFn<
+	D extends ShardDefs,
+	TInput,
+	TServerResult,
+	TActor = { actorId: string },
+> = (
 	shards: ShardAccessors<D>,
 	input: TInput,
-	ctx: OperationContext,
+	ctx: OperationContext<TActor>,
 ) => TServerResult;
 
 /** Maps execution type → required server impl shape */
@@ -214,34 +238,49 @@ type ServerImplMap<
 	TInput,
 	TErrors extends string,
 	TServerResult,
+	TActor = { actorId: string },
 > = {
 	optimistic: {
-		readonly validate?: ValidateFn<D, TInput, TErrors>;
+		readonly validate?: ValidateFn<D, TInput, TErrors, TActor>;
 	};
 	confirmed: {
-		readonly validate?: ValidateFn<D, TInput, TErrors>;
-		readonly apply: ApplyFn<D, TInput, undefined>;
+		readonly validate?: ValidateFn<D, TInput, TErrors, TActor>;
+		readonly apply: ApplyFn<D, TInput, undefined, TActor>;
 	};
 	computed: {
-		readonly validate?: ValidateFn<D, TInput, TErrors>;
-		readonly compute?: ComputeFn<D, TInput, TServerResult>;
-		readonly apply: ApplyFn<D, TInput, TServerResult>;
+		readonly validate?: ValidateFn<D, TInput, TErrors, TActor>;
+		readonly compute?: ComputeFn<D, TInput, TServerResult, TActor>;
+		readonly apply: ApplyFn<D, TInput, TServerResult, TActor>;
 	};
 };
 
 /** Resolve server impl config from operation metadata */
-type ServerImplConfig<D extends ShardDefs, Meta> = Meta extends {
+type ServerImplConfig<
+	D extends ShardDefs,
+	Meta,
+	TActor = { actorId: string },
+> = Meta extends {
 	_execution: infer E extends Execution;
 	_input: infer TInput;
 	_errorsSchema: infer TES;
 	_serverResultSchema: infer TSRS;
 }
-	? ServerImplMap<D, TInput, ExtractErrors<TES>, ExtractServerResult<TSRS>>[E]
+	? ServerImplMap<
+			D,
+			TInput,
+			ExtractErrors<TES>,
+			ExtractServerResult<TSRS>,
+			TActor
+		>[E]
 	: never;
 
 /** Pre-compute ServerImplConfig for all operations in the Ops record */
-type ServerImplLookup<D extends ShardDefs, Ops> = {
-	[K in keyof Ops]: ServerImplConfig<D, Ops[K]>;
+type ServerImplLookup<
+	D extends ShardDefs,
+	Ops,
+	TActor = { actorId: string },
+> = {
+	[K in keyof Ops]: ServerImplConfig<D, Ops[K], TActor>;
 };
 
 // ── Client impl configs (schema.client.ts) ───────────────────────────
@@ -272,6 +311,7 @@ export interface ChannelBuilder<
 	Name extends string,
 	D extends ShardDefs,
 	Ops extends object = object,
+	TActor extends { actorId: string } = { actorId: string },
 > {
 	readonly kind: Kind;
 	readonly name: Name;
@@ -280,12 +320,24 @@ export interface ChannelBuilder<
 	shard<SName extends string, S extends StandardSchemaV1>(
 		name: SName,
 		schema: S,
-	): ChannelBuilder<Kind, Name, AddSingleton<D, SName, InferSchema<S>>, Ops>;
+	): ChannelBuilder<
+		Kind,
+		Name,
+		AddSingleton<D, SName, InferSchema<S>>,
+		Ops,
+		TActor
+	>;
 
 	shardPerResource<SName extends string, S extends StandardSchemaV1>(
 		name: SName,
 		schema: S,
-	): ChannelBuilder<Kind, Name, AddPerResource<D, SName, InferSchema<S>>, Ops>;
+	): ChannelBuilder<
+		Kind,
+		Name,
+		AddPerResource<D, SName, InferSchema<S>>,
+		Ops,
+		TActor
+	>;
 
 	// Overload: optimistic
 	operation<
@@ -295,13 +347,14 @@ export interface ChannelBuilder<
 		TES extends StandardSchemaV1 | undefined = undefined,
 	>(
 		name: OName,
-		config: OptimisticOperationConfig<D, TInput, TScopeNames> &
+		config: OptimisticOperationConfig<D, TInput, TScopeNames, TActor> &
 			InferredSchemaFields<TES, undefined>,
 	): ChannelBuilder<
 		Kind,
 		Name,
 		D,
-		Ops & Record<OName, OpMeta<"optimistic", TInput, TES, undefined>>
+		Ops & Record<OName, OpMeta<"optimistic", TInput, TES, undefined>>,
+		TActor
 	>;
 
 	// Overload: confirmed
@@ -312,13 +365,14 @@ export interface ChannelBuilder<
 		TES extends StandardSchemaV1 | undefined = undefined,
 	>(
 		name: OName,
-		config: ConfirmedOperationConfig<TInput, TScopeNames> &
+		config: ConfirmedOperationConfig<TInput, TScopeNames, TActor> &
 			InferredSchemaFields<TES, undefined>,
 	): ChannelBuilder<
 		Kind,
 		Name,
 		D,
-		Ops & Record<OName, OpMeta<"confirmed", TInput, TES, undefined>>
+		Ops & Record<OName, OpMeta<"confirmed", TInput, TES, undefined>>,
+		TActor
 	>;
 
 	// Overload: computed
@@ -330,29 +384,30 @@ export interface ChannelBuilder<
 		TSRS extends StandardSchemaV1 | undefined = undefined,
 	>(
 		name: OName,
-		config: ComputedOperationConfig<TInput, TScopeNames> &
+		config: ComputedOperationConfig<TInput, TScopeNames, TActor> &
 			InferredSchemaFields<TES, TSRS>,
 	): ChannelBuilder<
 		Kind,
 		Name,
 		D,
-		Ops & Record<OName, OpMeta<"computed", TInput, TES, TSRS>>
+		Ops & Record<OName, OpMeta<"computed", TInput, TES, TSRS>>,
+		TActor
 	>;
 
 	serverImpl<OName extends string & keyof Ops>(
 		name: OName,
-		config: ServerImplLookup<D, Ops>[OName],
-	): ChannelBuilder<Kind, Name, D, Ops>;
+		config: ServerImplLookup<D, Ops, TActor>[OName],
+	): ChannelBuilder<Kind, Name, D, Ops, TActor>;
 
 	clientImpl<OName extends string & keyof Ops>(
 		name: OName,
 		config: ClientImplLookup<D, Ops>[OName],
-	): ChannelBuilder<Kind, Name, D, Ops>;
+	): ChannelBuilder<Kind, Name, D, Ops, TActor>;
 }
 
 // ── Channel constructors ─────────────────────────────────────────────
 
-interface ChannelOptions {
+export interface ChannelOptions {
 	readonly autoBroadcast?: boolean;
 	readonly broadcastMode?: "patch" | "full";
 }
@@ -360,11 +415,15 @@ interface ChannelOptions {
 // biome-ignore lint/complexity/noBannedTypes: empty object for type accumulation
 type EmptyOps = {};
 
-function createChannelBuilder<Kind extends ChannelKind, Name extends string>(
+export function createChannelBuilder<
+	Kind extends ChannelKind,
+	Name extends string,
+	TActor extends { actorId: string } = { actorId: string },
+>(
 	kind: Kind,
 	name: Name,
 	options?: ChannelOptions,
-): ChannelBuilder<Kind, Name, EmptyShardDefs, EmptyOps> {
+): ChannelBuilder<Kind, Name, EmptyShardDefs, EmptyOps, TActor> {
 	const shardDefs = new Map<string, ShardDefinition>();
 	const operations = new Map<string, OperationDefinition>();
 	const serverImpls = new Map<string, ServerImplDefinition>();

@@ -1,5 +1,9 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
-import { channel as channelBuilder } from "./channel";
+import {
+	type ChannelBuilder,
+	type ChannelOptions,
+	createChannelBuilder,
+} from "./channel";
 import {
 	type BaseActor,
 	createEngineBuilder,
@@ -7,6 +11,11 @@ import {
 } from "./engine";
 import type { InferSchema } from "./schema";
 import { shard } from "./shard";
+
+// biome-ignore lint/complexity/noBannedTypes: empty object for type accumulation via intersection
+type EmptyShardDefs = { readonly singletons: {}; readonly perResource: {} };
+// biome-ignore lint/complexity/noBannedTypes: empty object for type accumulation
+type EmptyOps = {};
 
 /** Configuration for defineApp */
 export interface DefineAppConfig<TSchema extends StandardSchemaV1> {
@@ -16,10 +25,22 @@ export interface DefineAppConfig<TSchema extends StandardSchemaV1> {
 	readonly serverActor: InferSchema<TSchema> & BaseActor;
 }
 
+/** Typed channel factory — creates channels pre-typed with TActor */
+export interface TypedChannelFactory<TActor extends BaseActor> {
+	durable<Name extends string>(
+		name: Name,
+		options?: ChannelOptions,
+	): ChannelBuilder<"durable", Name, EmptyShardDefs, EmptyOps, TActor>;
+	ephemeral<Name extends string>(
+		name: Name,
+		options?: ChannelOptions,
+	): ChannelBuilder<"ephemeral", Name, EmptyShardDefs, EmptyOps, TActor>;
+}
+
 /** Return type of defineApp — pre-typed channel, engine, and shard builders */
 export interface AppDefinition<TActor extends BaseActor> {
 	/** Channel builder — creates channels with TActor-typed OperationContext */
-	readonly channel: typeof channelBuilder;
+	readonly channel: TypedChannelFactory<TActor>;
 	/** Create an engine builder pre-typed with TActor */
 	engine(): EngineBuilder<Record<string, never>, TActor>;
 	/** Shard ref helper */
@@ -50,7 +71,22 @@ export function defineApp<TSchema extends StandardSchemaV1>(
 	type TActor = InferSchema<TSchema> & BaseActor;
 
 	return {
-		channel: channelBuilder,
+		channel: {
+			durable<Name extends string>(name: Name, options?: ChannelOptions) {
+				return createChannelBuilder<"durable", Name, TActor>(
+					"durable",
+					name,
+					options,
+				);
+			},
+			ephemeral<Name extends string>(name: Name, options?: ChannelOptions) {
+				return createChannelBuilder<"ephemeral", Name, TActor>(
+					"ephemeral",
+					name,
+					options,
+				);
+			},
+		},
 		engine(): EngineBuilder<Record<string, never>, TActor> {
 			return createEngineBuilder<TActor>(config.actor, config.serverActor);
 		},

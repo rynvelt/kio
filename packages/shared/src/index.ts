@@ -7,6 +7,7 @@ export type {
 export type {
 	ChannelBuilder,
 	ChannelData,
+	ChannelOptions,
 	ClientImplDefinition,
 	OperationContext,
 	OperationDefinition,
@@ -17,7 +18,7 @@ export type {
 	ShardDefinition,
 	ShardDefs,
 } from "./channel";
-export { channel } from "./channel";
+export { channel, createChannelBuilder } from "./channel";
 export type { AppDefinition, DefineAppConfig } from "./define-app";
 export { defineApp } from "./define-app";
 export { createDirectTransport } from "./direct-transport";
