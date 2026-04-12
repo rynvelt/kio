@@ -29,10 +29,13 @@ async function main() {
 		server.broadcastDirtyShards("presence");
 	}, 1000);
 
+	let playerCounter = 0;
+
 	Bun.serve({
 		port: 4000,
 		fetch(req, srv) {
-			if (upgrade(req, srv)) return;
+			const actorId = `player:${String(playerCounter++)}`;
+			if (upgrade(req, srv, { actorId })) return;
 			return new Response("Kio Counter Server");
 		},
 		websocket,
