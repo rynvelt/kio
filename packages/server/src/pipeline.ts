@@ -95,7 +95,11 @@ export class OperationPipeline {
 	async submit(submission: Submission): Promise<PipelineResult> {
 		try {
 			return await this.run(submission);
-		} catch {
+		} catch (err) {
+			console.error(
+				`[kio] INTERNAL_ERROR in ${submission.operationName}:`,
+				err,
+			);
 			return {
 				status: "rejected",
 				code: "INTERNAL_ERROR",

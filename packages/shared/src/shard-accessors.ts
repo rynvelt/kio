@@ -22,12 +22,20 @@ export function buildShardAccessors(
 
 		if (def.kind === "singleton") {
 			Object.defineProperty(accessors, shardType, {
-				get: () => root[shardType],
+				get: () => {
+					if (root[shardType] === undefined) {
+						root[shardType] = {};
+					}
+					return root[shardType];
+				},
 				enumerable: true,
 			});
 		} else {
 			accessors[shardType] = (resourceId: string) => {
 				const shardId = `${shardType}:${resourceId}`;
+				if (root[shardId] === undefined) {
+					root[shardId] = {};
+				}
 				return root[shardId];
 			};
 		}
