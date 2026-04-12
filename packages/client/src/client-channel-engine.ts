@@ -38,7 +38,7 @@ export class ClientChannelEngine {
 	/** Listeners registered before the store exists — attached when the store is created */
 	private readonly pendingListeners = new Map<string, Set<() => void>>();
 	private opCounter = 0;
-	private actorId = "";
+	private actor: { actorId: string } = { actorId: "" };
 
 	constructor(
 		private readonly channelData: ChannelData,
@@ -46,9 +46,9 @@ export class ClientChannelEngine {
 		private readonly submitTimeoutMs: number = 10_000,
 	) {}
 
-	/** Set the actor ID — called when the server sends the welcome message */
-	setActorId(actorId: string): void {
-		this.actorId = actorId;
+	/** Set the actor — called when the server sends the welcome message */
+	setActor(actor: unknown): void {
+		this.actor = actor as { actorId: string };
 	}
 
 	/**
@@ -195,7 +195,7 @@ export class ClientChannelEngine {
 	 * Returns a SubmitResult — never throws.
 	 */
 	async submit(operationName: string, input: unknown): Promise<SubmitResult> {
-		const opId = `${this.actorId}:${this.channelData.name}:${String(this.opCounter++)}`;
+		const opId = `${this.actor.actorId}:${this.channelData.name}:${String(this.opCounter++)}`;
 		const opDef = this.channelData.operations.get(operationName);
 
 		// Optimistic apply — predict locally before sending to server
@@ -361,7 +361,7 @@ export class ClientChannelEngine {
 		if (!shouldRetry) return false;
 
 		// Retry: new opId, remap pending + in-flight, recompute prediction, resend
-		const newOpId = `${this.actorId}:${this.channelData.name}:${String(this.opCounter++)}`;
+		const newOpId = `${this.actor.actorId}:${this.channelData.name}:${String(this.opCounter++)}`;
 
 		this.pendingSubmits.delete(oldOpId);
 		this.pendingSubmits.set(newOpId, pending);
@@ -390,7 +390,7 @@ export class ClientChannelEngine {
 
 	private buildCtx(): { actor: { actorId: string }; channelId: string } {
 		return {
-			actor: { actorId: this.actorId },
+			actor: this.actor,
 			channelId: this.channelData.name,
 		};
 	}

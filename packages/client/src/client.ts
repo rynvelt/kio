@@ -75,9 +75,9 @@ export function createClient<TChannels extends object>(
 	config.transport.onMessage((message) => {
 		switch (message.type) {
 			case "welcome":
-				// Server sent welcome with actorId + versions — respond with ours
+				// Server sent welcome with full actor + versions — respond with ours
 				for (const eng of engines.values()) {
-					eng.setActorId(message.actorId);
+					eng.setActor(message.actor);
 				}
 				config.transport.send({
 					type: "versions",

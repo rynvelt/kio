@@ -45,6 +45,7 @@ export type {
 	BroadcastServerMessage,
 	ClientMessage,
 	ClientTransport,
+	ErrorMessage,
 	ReadyMessage,
 	RejectMessage,
 	ServerMessage,

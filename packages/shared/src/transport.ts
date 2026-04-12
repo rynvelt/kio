@@ -21,10 +21,11 @@ export type ClientMessage = VersionsMessage | SubmitMessage;
 
 // ── Server → Client messages ─────────────────────────────────────────
 
-/** Server sends welcome on connect — actor identity + server shard versions */
+/** Server sends welcome on connect — full actor identity + server shard versions */
 export interface WelcomeMessage {
 	readonly type: "welcome";
-	readonly actorId: string;
+	/** Full actor object (untyped on the wire — typed at the engine layer) */
+	readonly actor: unknown;
 	readonly shards: Record<string, number>;
 }
 
@@ -69,13 +70,21 @@ export interface RejectMessage {
 	}>;
 }
 
+/** Server sends an error before closing the connection */
+export interface ErrorMessage {
+	readonly type: "error";
+	readonly code: string;
+	readonly message: string;
+}
+
 export type ServerMessage =
 	| WelcomeMessage
 	| StateMessage
 	| BroadcastServerMessage
 	| ReadyMessage
 	| AcknowledgeMessage
-	| RejectMessage;
+	| RejectMessage
+	| ErrorMessage;
 
 // ── Transport interfaces ─────────────────────────────────────────────
 
@@ -90,10 +99,11 @@ export interface ClientTransport {
 /** Server-side transport */
 export interface ServerTransport {
 	send(connectionId: string, message: ServerMessage): void;
+	close(connectionId: string): void;
 	onMessage(
 		handler: (connectionId: string, message: ClientMessage) => void,
 	): void;
-	onConnection(handler: (connectionId: string) => void): void;
+	onConnection(handler: (connectionId: string, actor: unknown) => void): void;
 	onDisconnection(
 		handler: (connectionId: string, reason: string) => void,
 	): void;

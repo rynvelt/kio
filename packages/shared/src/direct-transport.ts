@@ -6,18 +6,19 @@ import type {
 } from "./transport";
 
 const CONNECTION_ID = "direct";
+const DEFAULT_ACTOR = { actorId: "direct" };
 
 /**
  * In-process transport for testing.
  * Connects a client and server directly — no serialization, no network.
- * Call connect() to initiate the connection handshake.
+ * Call connect(actor) to initiate the connection handshake.
  * Call disconnect() to simulate a connection drop.
  */
 export function createDirectTransport(): {
 	client: ClientTransport;
 	server: ServerTransport;
 	/** Initiate the connection — fires onConnection on server, onConnected on client */
-	connect: () => void;
+	connect: (actor?: unknown) => void;
 	/** Simulate a disconnect — fires onDisconnection on server, onDisconnected on client */
 	disconnect: (reason?: string) => void;
 	connectionId: string;
@@ -28,7 +29,9 @@ export function createDirectTransport(): {
 	let serverMessageHandler:
 		| ((connectionId: string, message: ClientMessage) => void)
 		| null = null;
-	let serverConnectionHandler: ((connectionId: string) => void) | null = null;
+	let serverConnectionHandler:
+		| ((connectionId: string, actor: unknown) => void)
+		| null = null;
 	let serverDisconnectionHandler:
 		| ((connectionId: string, reason: string) => void)
 		| null = null;
@@ -60,6 +63,9 @@ export function createDirectTransport(): {
 				);
 			clientMessageHandler(message);
 		},
+		close(_connectionId) {
+			clientDisconnectedHandler?.("closed by server");
+		},
 		onMessage(handler) {
 			serverMessageHandler = handler;
 		},
@@ -71,8 +77,8 @@ export function createDirectTransport(): {
 		},
 	};
 
-	function connect() {
-		serverConnectionHandler?.(CONNECTION_ID);
+	function connect(actor: unknown = DEFAULT_ACTOR) {
+		serverConnectionHandler?.(CONNECTION_ID, actor);
 		clientConnectedHandler?.();
 	}
 

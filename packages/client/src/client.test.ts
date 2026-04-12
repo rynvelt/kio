@@ -111,7 +111,7 @@ describe("createClient", () => {
 		// Server sends welcome
 		server.send("direct", {
 			type: "welcome",
-			actorId: "player:alice",
+			actor: { actorId: "player:alice" },
 			shards: { world: 5 },
 		});
 

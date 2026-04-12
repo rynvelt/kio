@@ -179,7 +179,7 @@ export function createServer<TChannels extends object>(
 
 		transport?.send(connectionId, {
 			type: "welcome",
-			actorId: actor.actorId,
+			actor,
 			shards: serverVersions,
 		});
 	}
