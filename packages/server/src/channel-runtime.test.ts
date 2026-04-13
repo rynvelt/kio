@@ -7,7 +7,7 @@ import {
 } from "@kio/shared";
 import { expectToBeDefined } from "@kio/shared/test";
 import * as v from "valibot";
-import { ChannelEngine } from "./channel-engine";
+import { ChannelRuntime } from "./channel-runtime";
 import { MemoryStateAdapter } from "./persistence";
 
 function createSubscriber(
@@ -46,7 +46,7 @@ function setupDurableGame() {
 		});
 
 	const adapter = new MemoryStateAdapter();
-	const engine = new ChannelEngine(ch["~data"], adapter);
+	const engine = new ChannelRuntime(ch["~data"], adapter);
 	return { engine, adapter };
 }
 
@@ -72,7 +72,7 @@ function setupEphemeralPresence() {
 		});
 
 	const adapter = new MemoryStateAdapter();
-	const engine = new ChannelEngine(ch["~data"], adapter);
+	const engine = new ChannelRuntime(ch["~data"], adapter);
 	return { engine, adapter };
 }
 
@@ -83,7 +83,7 @@ function nextOpId(): string {
 	return `test:${String(opCounter++)}`;
 }
 
-describe("ChannelEngine — durable, autoBroadcast: true", () => {
+describe("ChannelRuntime — durable, autoBroadcast: true", () => {
 	test("submit changes state and broadcasts patches", async () => {
 		const { engine, adapter } = setupDurableGame();
 		await adapter.compareAndSwap("game", "world", 0, {
@@ -207,7 +207,7 @@ describe("ChannelEngine — durable, autoBroadcast: true", () => {
 	});
 });
 
-describe("ChannelEngine — durable, broadcastMode: full", () => {
+describe("ChannelRuntime — durable, broadcastMode: full", () => {
 	test("broadcasts full state instead of patches", async () => {
 		const ch = channel
 			.durable("game", { broadcastMode: "full" })
@@ -222,7 +222,7 @@ describe("ChannelEngine — durable, broadcastMode: full", () => {
 			});
 
 		const adapter = new MemoryStateAdapter();
-		const engine = new ChannelEngine(ch["~data"], adapter);
+		const engine = new ChannelRuntime(ch["~data"], adapter);
 		await adapter.compareAndSwap("game", "world", 0, {
 			stage: "PLAYING",
 			turn: 0,
@@ -253,7 +253,7 @@ describe("ChannelEngine — durable, broadcastMode: full", () => {
 	});
 });
 
-describe("ChannelEngine — ephemeral, autoBroadcast: false", () => {
+describe("ChannelRuntime — ephemeral, autoBroadcast: false", () => {
 	test("submit marks dirty, broadcastDirtyShards sends full state", async () => {
 		const { engine, adapter } = setupEphemeralPresence();
 

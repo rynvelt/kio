@@ -5,7 +5,8 @@ import type {
 	ServerTransport,
 	Subscriber,
 } from "@kio/shared";
-import { ChannelEngine } from "./channel-engine";
+import { ChannelRuntime } from "./channel-runtime";
+import { ConnectionManager } from "./connection-manager";
 import type { StateAdapter } from "./persistence";
 import type { AuthorizeFn, PipelineResult } from "./pipeline";
 
@@ -86,7 +87,7 @@ export interface Server<TChannels extends object = object> {
 	): void;
 
 	/** Get a channel engine by name */
-	getChannel(channelName: string & keyof TChannels): ChannelEngine | undefined;
+	getChannel(channelName: string & keyof TChannels): ChannelRuntime | undefined;
 }
 
 /** Create a server from an engine builder and config */
@@ -97,9 +98,8 @@ export function createServer<
 	engineBuilder: EngineBuilder<TChannels, TActor>,
 	config: ServerConfig<TActor>,
 ): Server<TChannels> {
-	const channels = new Map<string, ChannelEngine>();
+	const channels = new Map<string, ChannelRuntime>();
 	const { transport } = config;
-	const actorSchema = engineBuilder["~actorSchema"];
 	const serverActor: BaseActor = engineBuilder["~serverActor"] ?? {
 		actorId: "__kio:server__",
 	};
@@ -107,17 +107,14 @@ export function createServer<
 	for (const [name, channelData] of engineBuilder["~channels"]) {
 		channels.set(
 			name,
-			new ChannelEngine(channelData, config.persistence, {
+			new ChannelRuntime(channelData, config.persistence, {
 				authorize: config.authorize,
 				serverActorId: serverActor.actorId,
 			}),
 		);
 	}
 
-	// Actor storage per connection
-	const connectionActors = new Map<string, TActor>();
-
-	function getChannelOrThrow(channelName: string): ChannelEngine {
+	function getChannelOrThrow(channelName: string): ChannelRuntime {
 		const ch = channels.get(channelName);
 		if (!ch) {
 			throw new Error(`Channel "${channelName}" is not registered`);
@@ -125,152 +122,41 @@ export function createServer<
 		return ch;
 	}
 
+	// Connection manager handles handshake, actor validation, and subscriber lifecycle
+	let connectionManager: ConnectionManager<TActor> | undefined;
+
 	/** Create a Subscriber that sends broadcasts via the transport */
 	function createTransportSubscriber(connectionId: string): Subscriber {
+		if (connectionManager) {
+			return connectionManager.createTransportSubscriber(connectionId);
+		}
+		// Fallback for when no transport is configured (shouldn't be called)
 		return {
 			id: connectionId,
-			send(message) {
-				transport?.send(connectionId, {
-					type: "broadcast",
-					channelId: message.channelId,
-					kind: message.kind,
-					shards: message.shards,
-				});
-			},
+			send() {},
 		};
-	}
-
-	/** Validate raw actor from transport against the actor schema */
-	async function validateActor(rawActor: unknown): Promise<TActor | null> {
-		if (!actorSchema) {
-			// No schema — accept as-is (backward compat with engine() without defineApp)
-			return rawActor as TActor;
-		}
-		const result = await actorSchema["~standard"].validate(rawActor);
-		if ("issues" in result && result.issues) {
-			return null;
-		}
-		return ("value" in result ? result.value : rawActor) as TActor;
-	}
-
-	// Per-connection state between handshake steps
-	const pendingConnections = new Map<
-		string,
-		{
-			actor: TActor;
-			channelStates: Array<{
-				channelId: string;
-				kind: "durable" | "ephemeral";
-				shardStates: Map<string, { state: unknown; version: number }>;
-			}>;
-		}
-	>();
-
-	/**
-	 * Handshake step 1: transport signals client connected.
-	 * Validates actor, determines subscriptions, loads shard states, sends welcome.
-	 */
-	async function handleConnection(
-		connectionId: string,
-		rawActor: unknown,
-	): Promise<void> {
-		const actor = await validateActor(rawActor);
-		if (!actor) {
-			transport?.send(connectionId, {
-				type: "error",
-				code: "INVALID_ACTOR",
-				message: "Actor validation failed",
-			});
-			transport?.close(connectionId);
-			return;
-		}
-
-		connectionActors.set(connectionId, actor);
-		const subscriptions = config.defaultSubscriptions?.(actor) ?? [];
-
-		const channelStates: Array<{
-			channelId: string;
-			kind: "durable" | "ephemeral";
-			shardStates: Map<string, { state: unknown; version: number }>;
-		}> = [];
-		const serverVersions: Record<string, number> = {};
-
-		for (const sub of subscriptions) {
-			const ch = channels.get(sub.channelId);
-			if (!ch) continue;
-
-			ch.addSubscriber(createTransportSubscriber(connectionId), sub.shardIds);
-
-			const shardStates = await ch.loadShardStates(sub.shardIds);
-			channelStates.push({
-				channelId: sub.channelId,
-				kind: ch.kind,
-				shardStates,
-			});
-
-			for (const [shardId, { version }] of shardStates) {
-				serverVersions[shardId] = version;
-			}
-		}
-
-		pendingConnections.set(connectionId, { actor, channelStates });
-
-		transport?.send(connectionId, {
-			type: "welcome",
-			actor,
-			shards: serverVersions,
-		});
-	}
-
-	/**
-	 * Handshake step 2: client sends its versions.
-	 * Server diffs, sends only shards where client is behind, then ready.
-	 */
-	function handleClientVersions(
-		connectionId: string,
-		clientVersions: Record<string, number>,
-	): void {
-		const pending = pendingConnections.get(connectionId);
-		if (!pending) return;
-		pendingConnections.delete(connectionId);
-
-		for (const { channelId, kind, shardStates } of pending.channelStates) {
-			const entries: Array<{
-				shardId: string;
-				version: number;
-				state: unknown;
-			}> = [];
-
-			for (const [shardId, { state, version }] of shardStates) {
-				const clientVersion = clientVersions[shardId] ?? 0;
-				if (version > clientVersion) {
-					entries.push({ shardId, version, state });
-				}
-			}
-
-			if (entries.length > 0) {
-				transport?.send(connectionId, {
-					type: "state",
-					channelId,
-					kind,
-					shards: entries,
-				});
-			}
-		}
-
-		transport?.send(connectionId, { type: "ready" });
-		config.onConnect?.(pending.actor);
 	}
 
 	// Wire transport
 	if (transport) {
+		connectionManager = new ConnectionManager<TActor>({
+			transport,
+			channels,
+			actorSchema: engineBuilder["~actorSchema"],
+			defaultSubscriptions: config.defaultSubscriptions,
+			onConnect: config.onConnect,
+			onDisconnect: config.onDisconnect,
+		});
+
+		const cm = connectionManager;
+
 		transport.onConnection(async (connectionId, rawActor) => {
-			await handleConnection(connectionId, rawActor);
+			await cm.handleConnection(connectionId, rawActor);
 		});
 
 		transport.onMessage(async (connectionId, message) => {
 			if (message.type === "versions") {
-				handleClientVersions(connectionId, message.shards);
+				cm.handleClientVersions(connectionId, message.shards);
 				return;
 			}
 
@@ -286,7 +172,7 @@ export function createServer<
 					return;
 				}
 
-				const actor = connectionActors.get(connectionId);
+				const actor = cm.getActor(connectionId);
 				if (!actor) {
 					transport.send(connectionId, {
 						type: "reject",
@@ -322,18 +208,7 @@ export function createServer<
 		});
 
 		transport.onDisconnection((connectionId, reason) => {
-			const actor = connectionActors.get(connectionId);
-			connectionActors.delete(connectionId);
-			pendingConnections.delete(connectionId);
-
-			// Remove subscriber from all channels
-			for (const ch of channels.values()) {
-				ch.removeSubscriber(connectionId);
-			}
-
-			if (actor) {
-				config.onDisconnect?.(actor, reason);
-			}
+			cm.handleDisconnection(connectionId, reason);
 		});
 	}
 

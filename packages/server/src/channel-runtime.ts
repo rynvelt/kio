@@ -11,8 +11,8 @@ import {
 } from "./pipeline";
 import { ShardStateManager } from "./shard-state-manager";
 
-/** Configuration for a ChannelEngine */
-export interface ChannelEngineConfig {
+/** Configuration for a ChannelRuntime */
+export interface ChannelRuntimeConfig {
 	readonly authorize?: AuthorizeFn;
 	readonly deduplication?: DeduplicationTracker;
 	readonly serverActorId?: string;
@@ -23,7 +23,7 @@ export interface ChannelEngineConfig {
  * Composes ShardStateManager + OperationPipeline + BroadcastManager.
  * Not exposed to consumers — used by createServer internally.
  */
-export class ChannelEngine {
+export class ChannelRuntime {
 	private readonly stateManager: ShardStateManager;
 	private readonly pipeline: OperationPipeline;
 	private readonly broadcastManager: BroadcastManager;
@@ -33,7 +33,7 @@ export class ChannelEngine {
 	constructor(
 		private readonly channelData: ChannelData,
 		adapter: StateAdapter,
-		config: ChannelEngineConfig = {},
+		config: ChannelRuntimeConfig = {},
 	) {
 		this.autoBroadcast = channelData.options.autoBroadcast ?? true;
 		this.broadcastMode = channelData.options.broadcastMode ?? "patch";
