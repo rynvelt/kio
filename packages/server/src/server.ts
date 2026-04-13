@@ -5,10 +5,12 @@ import type {
 	ServerTransport,
 	Subscriber,
 } from "@kio/shared";
+import { ActorRegistry } from "./actor-registry";
 import { ChannelRuntime } from "./channel-runtime";
-import { ConnectionManager } from "./connection-manager";
 import type { StateAdapter } from "./persistence";
 import type { AuthorizeFn, PipelineResult } from "./pipeline";
+
+// ── Types & interfaces ──────────────────────────────────────────────
 
 /** Subscription entry: which channel and which shards */
 export interface SubscriptionRef {
@@ -44,7 +46,6 @@ type OperationInput<Ch, OpName extends string> =
 
 /** Typed server instance — channel names, operation names, and inputs are enforced */
 export interface Server<TChannels extends object = object> {
-	/** Submit an operation as server-as-actor */
 	submit<
 		CName extends string & keyof TChannels,
 		OpName extends OperationNames<TChannels[CName]>,
@@ -54,43 +55,38 @@ export interface Server<TChannels extends object = object> {
 		input: OperationInput<TChannels[CName], OpName>,
 	): Promise<PipelineResult>;
 
-	/** Flush dirty shards for a manual-broadcast channel */
 	broadcastDirtyShards(
 		channelName: string & keyof TChannels,
 		shardIds?: readonly string[],
 	): void;
 
-	/** Add a subscriber to a channel's shards */
 	addSubscriber(
 		channelName: string & keyof TChannels,
 		subscriber: Subscriber,
 		shardIds: readonly string[],
 	): void;
 
-	/** Remove a subscriber from a channel */
 	removeSubscriber(
 		channelName: string & keyof TChannels,
 		subscriberId: string,
 	): void;
 
-	/** Register a transport connection as a subscriber */
 	addTransportSubscriber(
 		channelName: string & keyof TChannels,
 		connectionId: string,
 		shardIds: readonly string[],
 	): void;
 
-	/** Remove a transport subscriber */
 	removeTransportSubscriber(
 		channelName: string & keyof TChannels,
 		connectionId: string,
 	): void;
 
-	/** Get a channel engine by name */
 	getChannel(channelName: string & keyof TChannels): ChannelRuntime | undefined;
 }
 
-/** Create a server from an engine builder and config */
+// ── createServer ────────────────────────────────────────────────────
+
 export function createServer<
 	TChannels extends object,
 	TActor extends BaseActor = BaseActor,
@@ -104,6 +100,7 @@ export function createServer<
 		actorId: "__kio:server__",
 	};
 
+	// Setup: create channel runtimes
 	for (const [name, channelData] of engineBuilder["~channels"]) {
 		channels.set(
 			name,
@@ -114,6 +111,10 @@ export function createServer<
 		);
 	}
 
+	const actorRegistry = new ActorRegistry<TActor>(
+		engineBuilder["~actorSchema"],
+	);
+
 	function getChannelOrThrow(channelName: string): ChannelRuntime {
 		const ch = channels.get(channelName);
 		if (!ch) {
@@ -122,95 +123,222 @@ export function createServer<
 		return ch;
 	}
 
-	// Connection manager handles handshake, actor validation, and subscriber lifecycle
-	let connectionManager: ConnectionManager<TActor> | undefined;
-
-	/** Create a Subscriber that sends broadcasts via the transport */
 	function createTransportSubscriber(connectionId: string): Subscriber {
-		if (connectionManager) {
-			return connectionManager.createTransportSubscriber(connectionId);
-		}
-		// Fallback for when no transport is configured (shouldn't be called)
 		return {
 			id: connectionId,
-			send() {},
+			send(message) {
+				transport?.send(connectionId, {
+					type: "broadcast",
+					channelId: message.channelId,
+					kind: message.kind,
+					shards: message.shards,
+				});
+			},
 		};
 	}
 
-	// Wire transport
-	if (transport) {
-		connectionManager = new ConnectionManager<TActor>({
-			transport,
-			channels,
-			actorSchema: engineBuilder["~actorSchema"],
-			defaultSubscriptions: config.defaultSubscriptions,
-			onConnect: config.onConnect,
-			onDisconnect: config.onDisconnect,
+	// ── Protocol handlers ─────────────────────────────────────────
+
+	/** Pending state between handshake step 1 and step 2 */
+	const pendingHandshakes = new Map<
+		string,
+		{
+			actor: TActor;
+			channelStates: Array<{
+				channelId: string;
+				kind: "durable" | "ephemeral";
+				shardStates: Map<string, { state: unknown; version: number }>;
+			}>;
+		}
+	>();
+
+	/**
+	 * Handshake step 1: validate actor, subscribe to channels,
+	 * load shard states, send welcome.
+	 */
+	async function handleConnection(
+		connectionId: string,
+		rawActor: unknown,
+	): Promise<void> {
+		const actor = await actorRegistry.validateAndStore(connectionId, rawActor);
+		if (!actor) {
+			transport?.send(connectionId, {
+				type: "error",
+				code: "INVALID_ACTOR",
+				message: "Actor validation failed",
+			});
+			transport?.close(connectionId);
+			return;
+		}
+
+		const subscriptions = config.defaultSubscriptions?.(actor) ?? [];
+
+		const channelStates: Array<{
+			channelId: string;
+			kind: "durable" | "ephemeral";
+			shardStates: Map<string, { state: unknown; version: number }>;
+		}> = [];
+		const serverVersions: Record<string, number> = {};
+
+		for (const sub of subscriptions) {
+			const ch = channels.get(sub.channelId);
+			if (!ch) continue;
+
+			ch.addSubscriber(createTransportSubscriber(connectionId), sub.shardIds);
+
+			const shardStates = await ch.loadShardStates(sub.shardIds);
+			channelStates.push({
+				channelId: sub.channelId,
+				kind: ch.kind,
+				shardStates,
+			});
+
+			for (const [shardId, { version }] of shardStates) {
+				serverVersions[shardId] = version;
+			}
+		}
+
+		pendingHandshakes.set(connectionId, { actor, channelStates });
+
+		transport?.send(connectionId, {
+			type: "welcome",
+			actor,
+			shards: serverVersions,
+		});
+	}
+
+	/**
+	 * Handshake step 2: diff versions, send state for stale shards, send ready.
+	 */
+	function handleClientVersions(
+		connectionId: string,
+		clientVersions: Record<string, number>,
+	): void {
+		const pending = pendingHandshakes.get(connectionId);
+		if (!pending) return;
+		pendingHandshakes.delete(connectionId);
+
+		for (const { channelId, kind, shardStates } of pending.channelStates) {
+			const entries: Array<{
+				shardId: string;
+				version: number;
+				state: unknown;
+			}> = [];
+
+			for (const [shardId, { state, version }] of shardStates) {
+				const clientVersion = clientVersions[shardId] ?? 0;
+				if (version > clientVersion) {
+					entries.push({ shardId, version, state });
+				}
+			}
+
+			if (entries.length > 0) {
+				transport?.send(connectionId, {
+					type: "state",
+					channelId,
+					kind,
+					shards: entries,
+				});
+			}
+		}
+
+		transport?.send(connectionId, { type: "ready" });
+		config.onConnect?.(pending.actor);
+	}
+
+	/** Route a client submit to the right channel, respond with ack/reject. */
+	async function handleSubmit(
+		connectionId: string,
+		message: {
+			channelId: string;
+			operationName: string;
+			input: unknown;
+			opId: string;
+		},
+	): Promise<void> {
+		const ch = channels.get(message.channelId);
+		if (!ch) {
+			transport?.send(connectionId, {
+				type: "reject",
+				opId: message.opId,
+				code: "INVALID_CHANNEL",
+				message: `Channel "${message.channelId}" is not registered`,
+			});
+			return;
+		}
+
+		const actor = actorRegistry.getActor(connectionId);
+		if (!actor) {
+			transport?.send(connectionId, {
+				type: "reject",
+				opId: message.opId,
+				code: "INTERNAL_ERROR",
+				message: "Connection has no associated actor",
+			});
+			return;
+		}
+
+		const result = await ch.submit({
+			operationName: message.operationName,
+			input: message.input,
+			actor,
+			opId: message.opId,
 		});
 
-		const cm = connectionManager;
+		if (result.status === "acknowledged") {
+			transport?.send(connectionId, {
+				type: "acknowledge",
+				opId: message.opId,
+			});
+		} else {
+			transport?.send(connectionId, {
+				type: "reject",
+				opId: message.opId,
+				code: result.code,
+				message: result.message,
+				shards: result.shards,
+			});
+		}
+	}
 
+	/** Clean up actor, unsubscribe from channels, notify consumer. */
+	function handleDisconnection(connectionId: string, reason: string): void {
+		const actor = actorRegistry.removeActor(connectionId);
+		pendingHandshakes.delete(connectionId);
+
+		for (const ch of channels.values()) {
+			ch.removeSubscriber(connectionId);
+		}
+
+		if (actor) {
+			config.onDisconnect?.(actor, reason);
+		}
+	}
+
+	// ── Wire transport to handlers ──────────────────────────────────
+
+	if (transport) {
 		transport.onConnection(async (connectionId, rawActor) => {
-			await cm.handleConnection(connectionId, rawActor);
+			await handleConnection(connectionId, rawActor);
 		});
 
 		transport.onMessage(async (connectionId, message) => {
-			if (message.type === "versions") {
-				cm.handleClientVersions(connectionId, message.shards);
-				return;
-			}
-
-			if (message.type === "submit") {
-				const ch = channels.get(message.channelId);
-				if (!ch) {
-					transport.send(connectionId, {
-						type: "reject",
-						opId: message.opId,
-						code: "INVALID_CHANNEL",
-						message: `Channel "${message.channelId}" is not registered`,
-					});
-					return;
-				}
-
-				const actor = cm.getActor(connectionId);
-				if (!actor) {
-					transport.send(connectionId, {
-						type: "reject",
-						opId: message.opId,
-						code: "INTERNAL_ERROR",
-						message: "Connection has no associated actor",
-					});
-					return;
-				}
-
-				const result = await ch.submit({
-					operationName: message.operationName,
-					input: message.input,
-					actor,
-					opId: message.opId,
-				});
-
-				if (result.status === "acknowledged") {
-					transport.send(connectionId, {
-						type: "acknowledge",
-						opId: message.opId,
-					});
-				} else {
-					transport.send(connectionId, {
-						type: "reject",
-						opId: message.opId,
-						code: result.code,
-						message: result.message,
-						shards: result.shards,
-					});
-				}
+			switch (message.type) {
+				case "versions":
+					handleClientVersions(connectionId, message.shards);
+					break;
+				case "submit":
+					await handleSubmit(connectionId, message);
+					break;
 			}
 		});
 
 		transport.onDisconnection((connectionId, reason) => {
-			cm.handleDisconnection(connectionId, reason);
+			handleDisconnection(connectionId, reason);
 		});
 	}
+
+	// ── Consumer API ────────────────────────────────────────────────
 
 	let serverOpCounter = 0;
 
