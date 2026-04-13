@@ -1,0 +1,30 @@
+{
+	"name": "@kio/example-lobby",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"dev": "bun run dev:server & bun run dev:client",
+		"dev:server": "bun run --watch src/server.ts",
+		"dev:client": "vite",
+		"build": "vite build"
+	},
+	"dependencies": {
+		"@kio/client": "workspace:*",
+		"@kio/react": "workspace:*",
+		"@kio/server": "workspace:*",
+		"@kio/shared": "workspace:*",
+		"@kio/transport-bun-ws": "workspace:*",
+		"@kio/transport-ws": "workspace:*",
+		"@mantine/core": "7.17.4",
+		"@mantine/hooks": "7.17.4",
+		"react": "^19",
+		"react-dom": "^19",
+		"valibot": "^1.3.1"
+	},
+	"devDependencies": {
+		"@types/react": "^19",
+		"@types/react-dom": "^19",
+		"@vitejs/plugin-react": "^4",
+		"vite": "^7"
+	}
+}
