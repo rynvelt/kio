@@ -33,8 +33,6 @@ async function main() {
 			await server.submit("lobby", "leave", {
 				actorId: actor.actorId,
 			});
-			// Re-check countdown state after leave
-			await checkPhaseTransition();
 		},
 	});
 
@@ -43,17 +41,16 @@ async function main() {
 		return shard?.state as RoomState | undefined;
 	}
 
-	async function checkPhaseTransition() {
-		const room = await getRoom();
-		if (!room) return;
+	// React to setReady — check if all players are ready for countdown
+	server.afterApply("lobby", "setReady", async ({ newState, submit }) => {
+		const room = newState.room as RoomState;
 
 		const readyCount = room.players.filter((p) => p.ready).length;
 		const allReady = readyCount === room.players.length && readyCount >= 2;
 
 		if (room.phase === "waiting" && allReady) {
-			// Start countdown
 			const endsAt = Date.now() + COUNTDOWN_SECONDS * 1000;
-			await server.submit("lobby", "setPhase", {
+			await submit("lobby", "setPhase", {
 				phase: "countdown",
 				countdownEndsAt: endsAt,
 			});
@@ -69,23 +66,25 @@ async function main() {
 				}
 			}, COUNTDOWN_SECONDS * 1000);
 		} else if (room.phase === "countdown" && !allReady) {
-			// Cancel countdown
 			if (countdownTimer) {
 				clearTimeout(countdownTimer);
 				countdownTimer = null;
 			}
-			await server.submit("lobby", "setPhase", {
+			await submit("lobby", "setPhase", {
 				phase: "waiting",
 				countdownEndsAt: null,
 			});
 		}
-	}
+	});
 
-	// Poll for phase transitions after any state change
-	// This is a workaround until afterApply hooks are implemented
-	setInterval(async () => {
-		await checkPhaseTransition();
-	}, 500);
+	// React to leave — cancel countdown timer if active
+	server.afterApply("lobby", "leave", ({ newState }) => {
+		const room = newState.room as RoomState;
+		if (room.phase !== "countdown" && countdownTimer) {
+			clearTimeout(countdownTimer);
+			countdownTimer = null;
+		}
+	});
 
 	Bun.serve({
 		port: 4001,

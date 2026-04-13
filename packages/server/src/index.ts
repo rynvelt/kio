@@ -11,5 +11,11 @@ export type {
 	PipelineResult,
 	Submission,
 } from "./pipeline";
-export type { Server, ServerConfig, SubscriptionRef } from "./server";
+export type {
+	AfterApplyContext,
+	AfterApplyHandler,
+	Server,
+	ServerConfig,
+	SubscriptionRef,
+} from "./server";
 export { createServer } from "./server";

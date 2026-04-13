@@ -28,6 +28,8 @@ export type PipelineResult =
 			readonly operationName: string;
 			readonly shardVersions: ReadonlyMap<string, number>;
 			readonly patchesByShard: ReadonlyMap<string, readonly Patch[]>;
+			/** Post-apply shard state keyed by shardId — captured during apply */
+			readonly newState: Readonly<Record<string, unknown>>;
 	  }
 	| {
 			readonly status: "rejected";
@@ -298,6 +300,7 @@ export class OperationPipeline {
 				operationName,
 				shardVersions: versions,
 				patchesByShard,
+				newState: newRoot,
 			};
 		}
 
@@ -321,6 +324,7 @@ export class OperationPipeline {
 			operationName,
 			shardVersions: ephemeralVersions,
 			patchesByShard,
+			newState: newRoot,
 		};
 	}
 
