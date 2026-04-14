@@ -6,6 +6,7 @@ import type {
 	Subscriber,
 } from "@kio/shared";
 import { ActorRegistry } from "./actor-registry";
+import { AfterCommitHooks } from "./after-commit-hooks";
 import { ChannelRuntime } from "./channel-runtime";
 import type { StateAdapter } from "./persistence";
 import type { AuthorizeFn, PipelineResult } from "./pipeline";
@@ -131,7 +132,7 @@ export interface Server<TChannels extends object = object> {
 }
 
 /** Submit function available inside afterCommit — same signature as Server.submit */
-type AfterCommitSubmitFn<TChannels extends object> = <
+export type AfterCommitSubmitFn<TChannels extends object> = <
 	CName extends string & keyof TChannels,
 	OpName extends OperationNames<TChannels[CName]>,
 >(
@@ -203,50 +204,16 @@ export function createServer<
 
 	// ── afterCommit hooks ───────────────────────────────────────────
 
-	const MAX_AFTER_COMMIT_DEPTH = 10;
+	const afterCommitHooks = new AfterCommitHooks<TChannels>();
 
-	/** Map<channelName, Map<operationName, handler[]>> */
-	const afterCommitHooks = new Map<
-		string,
-		Map<string, AfterCommitHandler<unknown, TChannels>[]>
-	>();
-
-	function registerAfterCommit(
-		channelName: string,
-		operationName: string,
-		handler: AfterCommitHandler<unknown, TChannels>,
-	): void {
-		let channelHooks = afterCommitHooks.get(channelName);
-		if (!channelHooks) {
-			channelHooks = new Map();
-			afterCommitHooks.set(channelName, channelHooks);
-		}
-		let opHooks = channelHooks.get(operationName);
-		if (!opHooks) {
-			opHooks = [];
-			channelHooks.set(operationName, opHooks);
-		}
-		opHooks.push(handler);
-	}
-
-	async function runAfterCommitHooks(
+	/** Fire-and-forget hook execution. Hooks never block commit, ack, or broadcast. */
+	function fireAfterCommit(
 		channelName: string,
 		result: PipelineResult & { status: "acknowledged" },
 		actor: BaseActor,
 		input: unknown,
 		depth: number,
-	): Promise<void> {
-		const handlers = afterCommitHooks
-			.get(channelName)
-			?.get(result.operationName);
-		if (!handlers || handlers.length === 0) return;
-
-		if (depth >= MAX_AFTER_COMMIT_DEPTH) {
-			throw new Error(
-				`afterCommit depth limit exceeded (${String(MAX_AFTER_COMMIT_DEPTH)}) — possible infinite loop`,
-			);
-		}
-
+	): void {
 		const boundSubmit: AfterCommitSubmitFn<TChannels> = (ch, op, submitInput) =>
 			internalSubmit(
 				ch as string,
@@ -257,28 +224,9 @@ export function createServer<
 				depth + 1,
 			);
 
-		for (const handler of handlers) {
-			await handler({
-				operationName: result.operationName,
-				input,
-				actor,
-				opId: result.opId,
-				newState: result.newState,
-				submit: boundSubmit,
-			});
-		}
-	}
-
-	/** Fire-and-forget hook execution. Hooks never block commit, ack, or broadcast. */
-	function fireAfterCommit(
-		channelName: string,
-		result: PipelineResult & { status: "acknowledged" },
-		actor: BaseActor,
-		input: unknown,
-		depth: number,
-	): void {
-		runAfterCommitHooks(channelName, result, actor, input, depth).catch(
-			(err) => {
+		afterCommitHooks
+			.run(channelName, result, actor, input, depth, boundSubmit)
+			.catch((err) => {
 				onAfterCommitError(err, {
 					channelName,
 					operationName: result.operationName,
@@ -286,8 +234,7 @@ export function createServer<
 					input,
 					opId: result.opId,
 				});
-			},
-		);
+			});
 	}
 
 	// ── Internal submit (shared by consumer API and transport protocol) ──
@@ -386,7 +333,7 @@ export function createServer<
 		},
 
 		afterCommit(channelName, operationName, handler) {
-			registerAfterCommit(
+			afterCommitHooks.register(
 				channelName as string,
 				operationName as string,
 				handler as AfterCommitHandler<unknown, TChannels>,
