@@ -7,7 +7,11 @@ import {
 	type Subscriber,
 	shard,
 } from "@kio/shared";
-import { createDirectTransport, expectToBeDefined } from "@kio/shared/test";
+import {
+	createDirectTransport,
+	createTypedTestClient,
+	expectToBeDefined,
+} from "@kio/shared/test";
 import * as v from "valibot";
 import { MemoryStateAdapter } from "./persistence";
 import { type AfterCommitErrorContext, createServer } from "./server";
@@ -202,10 +206,11 @@ describe("createServer", () => {
 			});
 
 			const {
-				client,
+				client: rawClient,
 				server: serverTransport,
 				connect,
 			} = createDirectTransport();
+			const client = createTypedTestClient(rawClient);
 			createServer(setupServerEngine(), {
 				persistence: adapter,
 				transport: serverTransport,
@@ -249,7 +254,9 @@ describe("createServer", () => {
 				turn: 0,
 			});
 
-			const { client, server: serverTransport } = createDirectTransport();
+			const { client: rawClient, server: serverTransport } =
+				createDirectTransport();
+			const client = createTypedTestClient(rawClient);
 			createServer(setupServerEngine(), {
 				persistence: adapter,
 				transport: serverTransport,
@@ -281,10 +288,11 @@ describe("createServer", () => {
 			});
 
 			const {
-				client,
+				client: rawClient,
 				server: serverTransport,
 				connectionId,
 			} = createDirectTransport();
+			const client = createTypedTestClient(rawClient);
 			const server = createServer(setupServerEngine(), {
 				persistence: adapter,
 				transport: serverTransport,
@@ -308,7 +316,9 @@ describe("createServer", () => {
 		});
 
 		test("transport rejects unknown channel", async () => {
-			const { client, server: serverTransport } = createDirectTransport();
+			const { client: rawClient, server: serverTransport } =
+				createDirectTransport();
+			const client = createTypedTestClient(rawClient);
 			createServer(setupServerEngine(), {
 				persistence: new MemoryStateAdapter(),
 				transport: serverTransport,
@@ -346,10 +356,11 @@ describe("createServer", () => {
 			});
 
 			const {
-				client,
+				client: rawClient,
 				server: serverTransport,
 				connect,
 			} = createDirectTransport();
+			const client = createTypedTestClient(rawClient);
 			createServer(setupServerEngine(), {
 				persistence: adapter,
 				transport: serverTransport,
@@ -404,10 +415,11 @@ describe("createServer", () => {
 			});
 
 			const {
-				client,
+				client: rawClient,
 				server: serverTransport,
 				connect,
 			} = createDirectTransport();
+			const client = createTypedTestClient(rawClient);
 			createServer(setupServerEngine(), {
 				persistence: adapter,
 				transport: serverTransport,
@@ -440,10 +452,11 @@ describe("createServer", () => {
 			});
 
 			const {
-				client,
+				client: rawClient,
 				server: serverTransport,
 				connect,
 			} = createDirectTransport();
+			const client = createTypedTestClient(rawClient);
 			const server = createServer(setupServerEngine(), {
 				persistence: adapter,
 				transport: serverTransport,
@@ -630,10 +643,11 @@ describe("createServer", () => {
 				ctx: AfterCommitErrorContext;
 			}> = [];
 			const {
-				client,
+				client: rawClient,
 				server: serverTransport,
 				connect,
 			} = createDirectTransport();
+			const client = createTypedTestClient(rawClient);
 			const server = createServer(setupServerEngine(), {
 				persistence: adapter,
 				transport: serverTransport,

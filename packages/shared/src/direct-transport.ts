@@ -1,9 +1,4 @@
-import type {
-	ClientMessage,
-	ClientTransport,
-	ServerMessage,
-	ServerTransport,
-} from "./transport";
+import type { ClientTransport, ServerTransport } from "./transport";
 
 const CONNECTION_ID = "direct";
 const DEFAULT_ACTOR = { actorId: "direct" };
@@ -13,6 +8,10 @@ const DEFAULT_ACTOR = { actorId: "direct" };
  * Connects a client and server directly — no serialization, no network.
  * Call connect(actor) to initiate the connection handshake.
  * Call disconnect() to simulate a connection drop.
+ *
+ * Implements the raw bytes transport contract. Tests that want to work
+ * with typed ClientMessage/ServerMessage values can wrap `client` with
+ * `createTypedTestClient(rawClient, jsonCodec)`.
  */
 export function createDirectTransport(): {
 	client: ClientTransport;
@@ -23,11 +22,11 @@ export function createDirectTransport(): {
 	disconnect: (reason?: string) => void;
 	connectionId: string;
 } {
-	let clientMessageHandler: ((message: ServerMessage) => void) | null = null;
+	let clientMessageHandler: ((data: string | Uint8Array) => void) | null = null;
 	let clientConnectedHandler: (() => void) | null = null;
 	let clientDisconnectedHandler: ((reason: string) => void) | null = null;
 	let serverMessageHandler:
-		| ((connectionId: string, message: ClientMessage) => void)
+		| ((connectionId: string, data: string | Uint8Array) => void)
 		| null = null;
 	let serverConnectionHandler:
 		| ((connectionId: string, actor: unknown) => void)
@@ -37,12 +36,12 @@ export function createDirectTransport(): {
 		| null = null;
 
 	const client: ClientTransport = {
-		send(message) {
+		send(data) {
 			if (!serverMessageHandler)
 				throw new Error(
 					"DirectTransport: server message handler not registered",
 				);
-			serverMessageHandler(CONNECTION_ID, message);
+			serverMessageHandler(CONNECTION_ID, data);
 		},
 		onMessage(handler) {
 			clientMessageHandler = handler;
@@ -56,12 +55,12 @@ export function createDirectTransport(): {
 	};
 
 	const server: ServerTransport = {
-		send(_connectionId, message) {
+		send(_connectionId, data) {
 			if (!clientMessageHandler)
 				throw new Error(
 					"DirectTransport: client message handler not registered",
 				);
-			clientMessageHandler(message);
+			clientMessageHandler(data);
 		},
 		close(_connectionId) {
 			clientDisconnectedHandler?.("closed by server");

@@ -1,8 +1,4 @@
-import type {
-	ClientMessage,
-	ServerMessage,
-	ServerTransport,
-} from "@kio/shared";
+import type { ServerTransport } from "@kio/shared";
 
 /** Data attached to each WebSocket connection */
 export type KioWsData = { connectionId: string; actor: unknown };
@@ -13,6 +9,9 @@ export type KioWsData = { connectionId: string; actor: unknown };
  * Returns a ServerTransport and a websocket handler object.
  * The consumer plugs the websocket handlers into their own Bun.serve()
  * and calls upgrade() in their fetch handler, passing the authenticated actor.
+ *
+ * The transport moves raw bytes; the server engine owns the codec. Incoming
+ * binary frames are delivered as Uint8Array; text frames are delivered as string.
  *
  * Usage:
  * ```ts
@@ -37,7 +36,7 @@ export function createBunWsTransport(): {
 	websocket: {
 		open: (ws: {
 			data: KioWsData;
-			send: (data: string) => void;
+			send: (data: string | Uint8Array) => void;
 			close: () => void;
 		}) => void;
 		message: (
@@ -56,7 +55,7 @@ export function createBunWsTransport(): {
 	) => boolean;
 } {
 	let messageHandler:
-		| ((connectionId: string, message: ClientMessage) => void)
+		| ((connectionId: string, data: string | Uint8Array) => void)
 		| null = null;
 	let connectionHandler:
 		| ((connectionId: string, actor: unknown) => void)
@@ -67,13 +66,13 @@ export function createBunWsTransport(): {
 
 	const sockets = new Map<
 		string,
-		{ send: (data: string) => void; close: () => void }
+		{ send: (data: string | Uint8Array) => void; close: () => void }
 	>();
 	let connectionCounter = 0;
 
 	const transport: ServerTransport = {
-		send(connectionId: string, message: ServerMessage) {
-			sockets.get(connectionId)?.send(JSON.stringify(message));
+		send(connectionId, data) {
+			sockets.get(connectionId)?.send(data);
 		},
 		close(connectionId: string) {
 			const ws = sockets.get(connectionId);
@@ -96,7 +95,7 @@ export function createBunWsTransport(): {
 	const websocket = {
 		open(ws: {
 			data: KioWsData;
-			send: (data: string) => void;
+			send: (data: string | Uint8Array) => void;
 			close: () => void;
 		}) {
 			sockets.set(ws.data.connectionId, ws);
@@ -106,8 +105,13 @@ export function createBunWsTransport(): {
 			ws: { data: KioWsData },
 			message: string | ArrayBuffer | Uint8Array,
 		) {
-			const parsed = JSON.parse(String(message)) as ClientMessage;
-			messageHandler?.(ws.data.connectionId, parsed);
+			const data: string | Uint8Array =
+				typeof message === "string"
+					? message
+					: message instanceof ArrayBuffer
+						? new Uint8Array(message)
+						: message;
+			messageHandler?.(ws.data.connectionId, data);
 		},
 		close(ws: { data: KioWsData }, _code: number, reason: string) {
 			sockets.delete(ws.data.connectionId);

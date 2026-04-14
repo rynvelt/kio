@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { type ClientMessage, channel, shard } from "@kio/shared";
-import { createDirectTransport, expectToBeDefined } from "@kio/shared/test";
+import { expectToBeDefined } from "@kio/shared/test";
 import * as v from "valibot";
 import { ClientChannelEngine } from "./client-channel-engine";
 
@@ -17,9 +17,11 @@ function setupGameEngine() {
 			},
 		});
 
-	const { client, server } = createDirectTransport();
-	const engine = new ClientChannelEngine(ch["~data"], client);
-	return { engine, client, server };
+	const sent: ClientMessage[] = [];
+	const engine = new ClientChannelEngine(ch["~data"], (msg) => {
+		sent.push(msg);
+	});
+	return { engine, sent };
 }
 
 describe("ClientChannelEngine", () => {
@@ -266,10 +268,7 @@ describe("ClientChannelEngine", () => {
 
 	describe("submit", () => {
 		test("sends submit message via transport", async () => {
-			const { engine, server } = setupGameEngine();
-			const received: ClientMessage[] = [];
-
-			server.onMessage((_connId, msg) => received.push(msg));
+			const { engine, sent: received } = setupGameEngine();
 
 			const promise = engine.submit("advanceTurn", {});
 
@@ -293,10 +292,7 @@ describe("ClientChannelEngine", () => {
 		});
 
 		test("resolves with reject on server rejection", async () => {
-			const { engine, server } = setupGameEngine();
-			const received: ClientMessage[] = [];
-
-			server.onMessage((_connId, msg) => received.push(msg));
+			const { engine, sent: received } = setupGameEngine();
 
 			const promise = engine.submit("advanceTurn", {});
 
@@ -319,10 +315,7 @@ describe("ClientChannelEngine", () => {
 		});
 
 		test("generates unique opIds", async () => {
-			const { engine, server } = setupGameEngine();
-			const received: ClientMessage[] = [];
-
-			server.onMessage((_connId, msg) => received.push(msg));
+			const { engine, sent: received } = setupGameEngine();
 
 			engine.submit("advanceTurn", {});
 			engine.submit("advanceTurn", {});
@@ -369,12 +362,10 @@ describe("ClientChannelEngine", () => {
 					},
 				});
 
-			const { client, server } = createDirectTransport();
-			const eng = new ClientChannelEngine(ch["~data"], client);
-
-			// Register server handler so transport doesn't throw
 			const sent: ClientMessage[] = [];
-			server.onMessage((_connId, msg) => sent.push(msg));
+			const eng = new ClientChannelEngine(ch["~data"], (msg) => {
+				sent.push(msg);
+			});
 
 			// Seed initial state
 			eng.handleStateMessage({
@@ -395,7 +386,7 @@ describe("ClientChannelEngine", () => {
 				],
 			});
 
-			return { engine: eng, sent, server };
+			return { engine: eng, sent };
 		}
 
 		test("shows predicted state immediately", () => {
@@ -663,11 +654,10 @@ describe("ClientChannelEngine", () => {
 				? ch.clientImpl("advanceTurn", { canRetry })
 				: ch;
 
-			const { client, server } = createDirectTransport();
-			const eng = new ClientChannelEngine(withClientImpl["~data"], client);
-
 			const sent: ClientMessage[] = [];
-			server.onMessage((_connId, msg) => sent.push(msg));
+			const eng = new ClientChannelEngine(withClientImpl["~data"], (msg) => {
+				sent.push(msg);
+			});
 
 			eng.handleStateMessage({
 				type: "state",
@@ -826,11 +816,14 @@ describe("ClientChannelEngine", () => {
 					},
 				});
 
-			const { client, server } = createDirectTransport();
-			const eng = new ClientChannelEngine(ch["~data"], client, 5);
-
 			const sent: ClientMessage[] = [];
-			server.onMessage((_connId, msg) => sent.push(msg));
+			const eng = new ClientChannelEngine(
+				ch["~data"],
+				(msg) => {
+					sent.push(msg);
+				},
+				5,
+			);
 
 			eng.handleStateMessage({
 				type: "state",
@@ -862,11 +855,10 @@ describe("ClientChannelEngine", () => {
 					},
 				});
 
-			const { client, server } = createDirectTransport();
-			const eng = new ClientChannelEngine(ch["~data"], client);
-
 			const sent: ClientMessage[] = [];
-			server.onMessage((_connId, msg) => sent.push(msg));
+			const eng = new ClientChannelEngine(ch["~data"], (msg) => {
+				sent.push(msg);
+			});
 
 			eng.handleStateMessage({
 				type: "state",

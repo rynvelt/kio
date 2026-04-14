@@ -1,4 +1,11 @@
-import type { BaseActor, ServerTransport, Subscriber } from "@kio/shared";
+import type {
+	BaseActor,
+	ClientMessage,
+	Codec,
+	ServerMessage,
+	ServerTransport,
+	Subscriber,
+} from "@kio/shared";
 import type { ActorRegistry } from "./actor-registry";
 import type { ChannelRuntime } from "./channel-runtime";
 import type { PipelineResult, Submission } from "./pipeline";
@@ -7,6 +14,7 @@ import type { SubscriptionRef } from "./server";
 /** Dependencies for TransportProtocol — all seams flow in as refs/callbacks. */
 export interface TransportProtocolDeps<TActor extends BaseActor> {
 	readonly transport: ServerTransport;
+	readonly codec: Codec;
 	readonly actorRegistry: ActorRegistry<TActor>;
 	readonly channels: ReadonlyMap<string, ChannelRuntime>;
 	/** Submit to a channel — returns the pipeline result without running afterCommit hooks. */
@@ -46,6 +54,7 @@ interface PendingHandshake<TActor extends BaseActor> {
  */
 export class TransportProtocol<TActor extends BaseActor> {
 	private readonly transport: ServerTransport;
+	private readonly codec: Codec;
 	private readonly actorRegistry: ActorRegistry<TActor>;
 	private readonly channels: ReadonlyMap<string, ChannelRuntime>;
 	private readonly submit: TransportProtocolDeps<TActor>["submit"];
@@ -60,6 +69,7 @@ export class TransportProtocol<TActor extends BaseActor> {
 
 	constructor(deps: TransportProtocolDeps<TActor>) {
 		this.transport = deps.transport;
+		this.codec = deps.codec;
 		this.actorRegistry = deps.actorRegistry;
 		this.channels = deps.channels;
 		this.submit = deps.submit;
@@ -72,7 +82,8 @@ export class TransportProtocol<TActor extends BaseActor> {
 			await this.handleConnection(connectionId, rawActor);
 		});
 
-		this.transport.onMessage(async (connectionId, message) => {
+		this.transport.onMessage(async (connectionId, data) => {
+			const message = this.codec.decode(data) as ClientMessage;
 			switch (message.type) {
 				case "versions":
 					this.handleClientVersions(connectionId, message.shards);
@@ -112,11 +123,15 @@ export class TransportProtocol<TActor extends BaseActor> {
 		return ch;
 	}
 
+	private send(connectionId: string, message: ServerMessage): void {
+		this.transport.send(connectionId, this.codec.encode(message));
+	}
+
 	private createSubscriber(connectionId: string): Subscriber {
 		return {
 			id: connectionId,
 			send: (message) => {
-				this.transport.send(connectionId, {
+				this.send(connectionId, {
 					type: "broadcast",
 					channelId: message.channelId,
 					kind: message.kind,
@@ -139,7 +154,7 @@ export class TransportProtocol<TActor extends BaseActor> {
 			rawActor,
 		);
 		if (!actor) {
-			this.transport.send(connectionId, {
+			this.send(connectionId, {
 				type: "error",
 				code: "INVALID_ACTOR",
 				message: "Actor validation failed",
@@ -173,7 +188,7 @@ export class TransportProtocol<TActor extends BaseActor> {
 
 		this.pendingHandshakes.set(connectionId, { actor, channelStates });
 
-		this.transport.send(connectionId, {
+		this.send(connectionId, {
 			type: "welcome",
 			actor,
 			shards: serverVersions,
@@ -206,7 +221,7 @@ export class TransportProtocol<TActor extends BaseActor> {
 			}
 
 			if (entries.length > 0) {
-				this.transport.send(connectionId, {
+				this.send(connectionId, {
 					type: "state",
 					channelId,
 					kind,
@@ -215,7 +230,7 @@ export class TransportProtocol<TActor extends BaseActor> {
 			}
 		}
 
-		this.transport.send(connectionId, { type: "ready" });
+		this.send(connectionId, { type: "ready" });
 		this.onConnect?.(pending.actor);
 	}
 
@@ -230,7 +245,7 @@ export class TransportProtocol<TActor extends BaseActor> {
 		},
 	): Promise<void> {
 		if (!this.channels.has(message.channelId)) {
-			this.transport.send(connectionId, {
+			this.send(connectionId, {
 				type: "reject",
 				opId: message.opId,
 				code: "INVALID_CHANNEL",
@@ -241,7 +256,7 @@ export class TransportProtocol<TActor extends BaseActor> {
 
 		const actor = this.actorRegistry.getActor(connectionId);
 		if (!actor) {
-			this.transport.send(connectionId, {
+			this.send(connectionId, {
 				type: "reject",
 				opId: message.opId,
 				code: "INTERNAL_ERROR",
@@ -258,13 +273,13 @@ export class TransportProtocol<TActor extends BaseActor> {
 		});
 
 		if (result.status === "acknowledged") {
-			this.transport.send(connectionId, {
+			this.send(connectionId, {
 				type: "acknowledge",
 				opId: message.opId,
 			});
 			this.runAfterCommit(message.channelId, result, actor, message.input);
 		} else {
-			this.transport.send(connectionId, {
+			this.send(connectionId, {
 				type: "reject",
 				opId: message.opId,
 				code: result.code,

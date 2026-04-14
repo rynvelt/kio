@@ -5,7 +5,12 @@ import {
 	type ServerMessage,
 	shard,
 } from "@kio/shared";
-import { createDirectTransport, expectToBeDefined } from "@kio/shared/test";
+import {
+	createDirectTransport,
+	createTypedTestClient,
+	expectToBeDefined,
+	jsonCodec,
+} from "@kio/shared/test";
 import * as v from "valibot";
 import { ActorRegistry } from "./actor-registry";
 import { ChannelRuntime } from "./channel-runtime";
@@ -73,8 +78,14 @@ function setupProtocol(
 		}>;
 	} = {},
 ) {
-	const { client, server, connect, disconnect, connectionId } =
-		createDirectTransport();
+	const {
+		client: rawClient,
+		server,
+		connect,
+		disconnect,
+		connectionId,
+	} = createDirectTransport();
+	const client = createTypedTestClient(rawClient);
 	const adapter = new MemoryStateAdapter();
 	const gameRuntime = new ChannelRuntime(setupGameChannel(), adapter);
 	const presenceRuntime = new ChannelRuntime(setupPresenceChannel(), adapter);
@@ -98,6 +109,7 @@ function setupProtocol(
 
 	const protocol = new TransportProtocol<BaseActor>({
 		transport: server,
+		codec: jsonCodec,
 		actorRegistry,
 		channels,
 		submit: opts.submitOverride ?? defaultSubmit,

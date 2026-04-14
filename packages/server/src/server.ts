@@ -1,10 +1,12 @@
 import type {
 	BaseActor,
 	ChannelBuilder,
+	Codec,
 	EngineBuilder,
 	ServerTransport,
 	Subscriber,
 } from "@kio/shared";
+import { jsonCodec } from "@kio/shared";
 import { ActorRegistry } from "./actor-registry";
 import { AfterCommitHooks } from "./after-commit-hooks";
 import { ChannelRuntime } from "./channel-runtime";
@@ -49,6 +51,8 @@ function defaultOnAfterCommitError(
 export interface ServerConfig<TActor extends BaseActor = BaseActor> {
 	readonly persistence: StateAdapter;
 	readonly transport?: ServerTransport;
+	/** Serialization codec used at the transport boundary. Defaults to `jsonCodec` (JSON + Set/Map support). */
+	readonly codec?: Codec;
 	readonly authorize?: AuthorizeFn;
 	readonly defaultSubscriptions?: (actor: TActor) => readonly SubscriptionRef[];
 	readonly onConnect?: (actor: TActor) => void;
@@ -262,6 +266,7 @@ export function createServer<
 	const protocol = transport
 		? new TransportProtocol<TActor>({
 				transport,
+				codec: config.codec ?? jsonCodec,
 				actorRegistry,
 				channels,
 				submit: (channelName, submission) =>

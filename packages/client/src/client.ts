@@ -1,15 +1,21 @@
 import type {
 	ChannelBuilder,
+	ClientMessage,
 	ClientTransport,
+	Codec,
 	EngineBuilder,
+	ServerMessage,
 	ShardState,
 	SubmitResult,
 } from "@kio/shared";
+import { jsonCodec } from "@kio/shared";
 import { ClientChannelEngine } from "./client-channel-engine";
 
 /** Configuration for createClient */
 export interface ClientConfig {
 	readonly transport: ClientTransport;
+	/** Serialization codec used at the transport boundary. Defaults to `jsonCodec` (JSON + Set/Map support). */
+	readonly codec?: Codec;
 	/** Timeout in ms for submit operations. Default: 10000 */
 	readonly submitTimeoutMs?: number;
 }
@@ -62,24 +68,31 @@ export function createClient<TChannels extends object>(
 	const engines = new Map<string, ClientChannelEngine>();
 	let isReady = false;
 	const timeoutMs = config.submitTimeoutMs ?? 10_000;
+	const codec = config.codec ?? jsonCodec;
+
+	/** Send a typed ClientMessage through the raw transport, encoded via codec. */
+	const sendMessage = (message: ClientMessage): void => {
+		config.transport.send(codec.encode(message));
+	};
 
 	// Create a ClientChannelEngine per channel
 	for (const [name, channelData] of engineBuilder["~channels"]) {
 		engines.set(
 			name,
-			new ClientChannelEngine(channelData, config.transport, timeoutMs),
+			new ClientChannelEngine(channelData, sendMessage, timeoutMs),
 		);
 	}
 
 	// Wire transport messages to the right engine
-	config.transport.onMessage((message) => {
+	config.transport.onMessage((data) => {
+		const message = codec.decode(data) as ServerMessage;
 		switch (message.type) {
 			case "welcome":
 				// Server sent welcome with full actor + versions — respond with ours
 				for (const eng of engines.values()) {
 					eng.setActor(message.actor);
 				}
-				config.transport.send({
+				sendMessage({
 					type: "versions",
 					shards: collectLocalVersions(engines),
 				});

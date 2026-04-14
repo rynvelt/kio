@@ -1,93 +1,78 @@
 import { describe, expect, test } from "bun:test";
 import { createDirectTransport } from "./direct-transport";
 import { expectToBeDefined } from "./test-helpers";
-import type { ClientMessage, ServerMessage } from "./transport";
 
 describe("DirectTransport", () => {
-	test("client send reaches server handler", () => {
+	test("client send reaches server handler as raw bytes", () => {
 		const { client, server } = createDirectTransport();
-		const received: { connectionId: string; message: ClientMessage }[] = [];
+		const received: { connectionId: string; data: string | Uint8Array }[] = [];
 
-		server.onMessage((connectionId, message) => {
-			received.push({ connectionId, message });
+		server.onMessage((connectionId, data) => {
+			received.push({ connectionId, data });
 		});
 
-		client.send({
-			type: "submit",
-			channelId: "game",
-			operationName: "advanceTurn",
-			input: {},
-			opId: "op-1",
-		});
+		client.send("hello-server");
 
 		expect(received).toHaveLength(1);
 		const first = received[0];
 		expectToBeDefined(first);
 		expect(first.connectionId).toBe("direct");
-		expect(first.message.type).toBe("submit");
-		if (first.message.type === "submit") {
-			expect(first.message.operationName).toBe("advanceTurn");
-		}
+		expect(first.data).toBe("hello-server");
 	});
 
-	test("server send reaches client handler", () => {
+	test("server send reaches client handler as raw bytes", () => {
 		const { client, server, connectionId } = createDirectTransport();
-		const received: ServerMessage[] = [];
+		const received: (string | Uint8Array)[] = [];
 
-		client.onMessage((message) => {
-			received.push(message);
+		client.onMessage((data) => {
+			received.push(data);
 		});
 
-		server.send(connectionId, {
-			type: "acknowledge",
-			opId: "op-1",
-		});
+		server.send(connectionId, "hello-client");
 
 		expect(received).toHaveLength(1);
-		expectToBeDefined(received[0]);
-		expect(received[0].type).toBe("acknowledge");
+		expect(received[0]).toBe("hello-client");
 	});
 
-	test("bidirectional communication", () => {
+	test("bidirectional raw-bytes communication", () => {
 		const { client, server, connectionId } = createDirectTransport();
-		const serverReceived: ClientMessage[] = [];
-		const clientReceived: ServerMessage[] = [];
+		const serverReceived: (string | Uint8Array)[] = [];
+		const clientReceived: (string | Uint8Array)[] = [];
 
-		server.onMessage((_connId, message) => {
-			serverReceived.push(message);
+		server.onMessage((_connId, data) => {
+			serverReceived.push(data);
 		});
-		client.onMessage((message) => {
-			clientReceived.push(message);
-		});
-
-		client.send({
-			type: "submit",
-			channelId: "game",
-			operationName: "op",
-			input: {},
-			opId: "op-1",
+		client.onMessage((data) => {
+			clientReceived.push(data);
 		});
 
-		server.send(connectionId, {
-			type: "acknowledge",
-			opId: "op-1",
+		client.send("from-client");
+		server.send(connectionId, "from-server");
+
+		expect(serverReceived).toEqual(["from-client"]);
+		expect(clientReceived).toEqual(["from-server"]);
+	});
+
+	test("transports pass Uint8Array through unchanged", () => {
+		const { client, server } = createDirectTransport();
+		const received: (string | Uint8Array)[] = [];
+
+		server.onMessage((_id, data) => {
+			received.push(data);
 		});
 
-		expect(serverReceived).toHaveLength(1);
-		expect(clientReceived).toHaveLength(1);
+		const bytes = new Uint8Array([1, 2, 3, 4]);
+		client.send(bytes);
+
+		expect(received).toHaveLength(1);
+		expect(received[0]).toBe(bytes);
 	});
 
 	test("throws if server handler not registered", () => {
 		const { client } = createDirectTransport();
 
 		expect(() => {
-			client.send({
-				type: "submit",
-				channelId: "game",
-				operationName: "op",
-				input: {},
-				opId: "op-1",
-			});
+			client.send("payload");
 		}).toThrow("server message handler not registered");
 	});
 
@@ -95,10 +80,7 @@ describe("DirectTransport", () => {
 		const { server, connectionId } = createDirectTransport();
 
 		expect(() => {
-			server.send(connectionId, {
-				type: "acknowledge",
-				opId: "op-1",
-			});
+			server.send(connectionId, "payload");
 		}).toThrow("client message handler not registered");
 	});
 });

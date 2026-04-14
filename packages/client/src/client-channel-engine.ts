@@ -2,7 +2,7 @@ import {
 	type BroadcastServerMessage,
 	buildShardAccessors,
 	type ChannelData,
-	type ClientTransport,
+	type ClientMessage,
 	type OperationDefinition,
 	type RejectMessage,
 	type ShardState,
@@ -42,7 +42,7 @@ export class ClientChannelEngine {
 
 	constructor(
 		private readonly channelData: ChannelData,
-		private readonly transport: ClientTransport,
+		private readonly sendMessage: (message: ClientMessage) => void,
 		private readonly submitTimeoutMs: number = 10_000,
 	) {}
 
@@ -236,7 +236,7 @@ export class ClientChannelEngine {
 
 		this.startTimer(opId);
 
-		this.transport.send({
+		this.sendMessage({
 			type: "submit",
 			channelId: this.channelData.name,
 			operationName,
@@ -377,7 +377,7 @@ export class ClientChannelEngine {
 		);
 
 		this.startTimer(newOpId);
-		this.transport.send({
+		this.sendMessage({
 			type: "submit",
 			channelId: this.channelData.name,
 			operationName: inFlight.operationName,

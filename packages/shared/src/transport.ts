@@ -87,21 +87,26 @@ export type ServerMessage =
 	| ErrorMessage;
 
 // ── Transport interfaces ─────────────────────────────────────────────
+//
+// Transports move encoded bytes only — they do not know about message
+// shapes or serialization format. The engine (createServer / createClient)
+// uses a Codec to encode outgoing messages and decode incoming data at the
+// transport boundary.
 
-/** Client-side transport */
+/** Client-side transport — moves encoded bytes between the client engine and the server. */
 export interface ClientTransport {
-	send(message: ClientMessage): void;
-	onMessage(handler: (message: ServerMessage) => void): void;
+	send(data: string | Uint8Array): void;
+	onMessage(handler: (data: string | Uint8Array) => void): void;
 	onConnected(handler: () => void): void;
 	onDisconnected(handler: (reason: string) => void): void;
 }
 
-/** Server-side transport */
+/** Server-side transport — moves encoded bytes between the server engine and each connected client. */
 export interface ServerTransport {
-	send(connectionId: string, message: ServerMessage): void;
+	send(connectionId: string, data: string | Uint8Array): void;
 	close(connectionId: string): void;
 	onMessage(
-		handler: (connectionId: string, message: ClientMessage) => void,
+		handler: (connectionId: string, data: string | Uint8Array) => void,
 	): void;
 	onConnection(handler: (connectionId: string, actor: unknown) => void): void;
 	onDisconnection(

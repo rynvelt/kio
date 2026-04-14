@@ -1,8 +1,4 @@
-import type {
-	ClientMessage,
-	ClientTransport,
-	ServerMessage,
-} from "@kio/shared";
+import type { ClientTransport } from "@kio/shared";
 
 export interface WsTransportOptions {
 	/** Factory that creates a new WebSocket connection */
@@ -18,6 +14,9 @@ export interface WsTransportOptions {
  * The transport handles the reconnect lifecycle — on disconnect, it calls
  * connect() again after the configured delay.
  *
+ * The transport moves raw bytes; the client engine owns the codec. Binary
+ * frames are delivered as Uint8Array; text frames are delivered as string.
+ *
  * Usage:
  * ```ts
  * const transport = createWsTransport({
@@ -31,21 +30,25 @@ export function createWsTransport(
 ): ClientTransport {
 	const reconnectDelay = options.reconnectDelayMs ?? 1000;
 
-	let messageHandler: ((message: ServerMessage) => void) | null = null;
+	let messageHandler: ((data: string | Uint8Array) => void) | null = null;
 	let connectedHandler: (() => void) | null = null;
 	let disconnectedHandler: ((reason: string) => void) | null = null;
 	let ws: WebSocket | null = null;
 
 	function connect() {
 		ws = options.connect();
+		ws.binaryType = "arraybuffer";
 
 		ws.onopen = () => {
 			connectedHandler?.();
 		};
 
 		ws.onmessage = (event) => {
-			const message = JSON.parse(String(event.data)) as ServerMessage;
-			messageHandler?.(message);
+			const data: string | Uint8Array =
+				typeof event.data === "string"
+					? event.data
+					: new Uint8Array(event.data as ArrayBuffer);
+			messageHandler?.(data);
 		};
 
 		ws.onclose = (event) => {
@@ -57,8 +60,16 @@ export function createWsTransport(
 	connect();
 
 	return {
-		send(message: ClientMessage) {
-			ws?.send(JSON.stringify(message));
+		send(data) {
+			if (!ws) return;
+			if (typeof data === "string") {
+				ws.send(data);
+			} else {
+				// Uint8Array<ArrayBufferLike> is runtime-compatible with WebSocket's
+				// BufferSource parameter; the ArrayBufferLike vs ArrayBuffer mismatch
+				// is purely a TS generic quirk.
+				ws.send(data as unknown as BufferSource);
+			}
 		},
 		onMessage(handler) {
 			messageHandler = handler;

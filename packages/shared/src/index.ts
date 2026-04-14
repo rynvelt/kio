@@ -19,6 +19,8 @@ export type {
 	ShardDefs,
 } from "./channel";
 export { channel, createChannelBuilder } from "./channel";
+export type { Codec } from "./codec";
+export { jsonCodec } from "./codec";
 export type { AppDefinition, DefineAppConfig } from "./define-app";
 export { defineApp } from "./define-app";
 export { createDirectTransport } from "./direct-transport";

@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { type ClientMessage, channel, engine, shard } from "@kio/shared";
-import { createDirectTransport, expectToBeDefined } from "@kio/shared/test";
+import {
+	createDirectTransport,
+	createTypedTestServer,
+	expectToBeDefined,
+} from "@kio/shared/test";
 import * as v from "valibot";
 import { createClient } from "./client";
 
@@ -36,7 +40,8 @@ function setupClientEngine() {
 
 describe("createClient", () => {
 	test("routes state messages to correct channel engine", () => {
-		const { client: transport, server } = createDirectTransport();
+		const { client: transport, server: rawServer } = createDirectTransport();
+		const server = createTypedTestServer(rawServer);
 		const clientInstance = createClient(setupClientEngine(), {
 			transport,
 		});
@@ -64,7 +69,8 @@ describe("createClient", () => {
 	});
 
 	test("routes broadcast messages to correct channel engine", () => {
-		const { client: transport, server } = createDirectTransport();
+		const { client: transport, server: rawServer } = createDirectTransport();
+		const server = createTypedTestServer(rawServer);
 		const clientInstance = createClient(setupClientEngine(), {
 			transport,
 		});
@@ -102,7 +108,8 @@ describe("createClient", () => {
 	});
 
 	test("responds to server welcome with client versions", () => {
-		const { client: transport, server } = createDirectTransport();
+		const { client: transport, server: rawServer } = createDirectTransport();
+		const server = createTypedTestServer(rawServer);
 		createClient(setupClientEngine(), { transport });
 
 		const captured: ClientMessage[] = [];
@@ -121,7 +128,8 @@ describe("createClient", () => {
 	});
 
 	test("sets ready flag after ready message", () => {
-		const { client: transport, server } = createDirectTransport();
+		const { client: transport, server: rawServer } = createDirectTransport();
+		const server = createTypedTestServer(rawServer);
 		const clientInstance = createClient(setupClientEngine(), {
 			transport,
 		});
@@ -134,7 +142,8 @@ describe("createClient", () => {
 	});
 
 	test("submit routes through transport and resolves on acknowledge", async () => {
-		const { client: transport, server } = createDirectTransport();
+		const { client: transport, server: rawServer } = createDirectTransport();
+		const server = createTypedTestServer(rawServer);
 		const clientInstance = createClient(setupClientEngine(), {
 			transport,
 		});
