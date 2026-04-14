@@ -9,6 +9,7 @@ import { ActorRegistry } from "./actor-registry";
 import { ChannelRuntime } from "./channel-runtime";
 import type { StateAdapter } from "./persistence";
 import type { AuthorizeFn, PipelineResult } from "./pipeline";
+import { TransportProtocol } from "./transport-protocol";
 
 // ── Types & interfaces ──────────────────────────────────────────────
 
@@ -167,228 +168,6 @@ export function createServer<
 		return ch;
 	}
 
-	function createTransportSubscriber(connectionId: string): Subscriber {
-		return {
-			id: connectionId,
-			send(message) {
-				transport?.send(connectionId, {
-					type: "broadcast",
-					channelId: message.channelId,
-					kind: message.kind,
-					shards: message.shards,
-				});
-			},
-		};
-	}
-
-	// ── Protocol handlers ─────────────────────────────────────────
-
-	/** Pending state between handshake step 1 and step 2 */
-	const pendingHandshakes = new Map<
-		string,
-		{
-			actor: TActor;
-			channelStates: Array<{
-				channelId: string;
-				kind: "durable" | "ephemeral";
-				shardStates: Map<string, { state: unknown; version: number }>;
-			}>;
-		}
-	>();
-
-	/**
-	 * Handshake step 1: validate actor, subscribe to channels,
-	 * load shard states, send welcome.
-	 */
-	async function handleConnection(
-		connectionId: string,
-		rawActor: unknown,
-	): Promise<void> {
-		const actor = await actorRegistry.validateAndStore(connectionId, rawActor);
-		if (!actor) {
-			transport?.send(connectionId, {
-				type: "error",
-				code: "INVALID_ACTOR",
-				message: "Actor validation failed",
-			});
-			transport?.close(connectionId);
-			return;
-		}
-
-		const subscriptions = config.defaultSubscriptions?.(actor) ?? [];
-
-		const channelStates: Array<{
-			channelId: string;
-			kind: "durable" | "ephemeral";
-			shardStates: Map<string, { state: unknown; version: number }>;
-		}> = [];
-		const serverVersions: Record<string, number> = {};
-
-		for (const sub of subscriptions) {
-			const ch = channels.get(sub.channelId);
-			if (!ch) continue;
-
-			ch.addSubscriber(createTransportSubscriber(connectionId), sub.shardIds);
-
-			const shardStates = await ch.loadShardStates(sub.shardIds);
-			channelStates.push({
-				channelId: sub.channelId,
-				kind: ch.kind,
-				shardStates,
-			});
-
-			for (const [shardId, { version }] of shardStates) {
-				serverVersions[shardId] = version;
-			}
-		}
-
-		pendingHandshakes.set(connectionId, { actor, channelStates });
-
-		transport?.send(connectionId, {
-			type: "welcome",
-			actor,
-			shards: serverVersions,
-		});
-	}
-
-	/**
-	 * Handshake step 2: diff versions, send state for stale shards, send ready.
-	 */
-	function handleClientVersions(
-		connectionId: string,
-		clientVersions: Record<string, number>,
-	): void {
-		const pending = pendingHandshakes.get(connectionId);
-		if (!pending) return;
-		pendingHandshakes.delete(connectionId);
-
-		for (const { channelId, kind, shardStates } of pending.channelStates) {
-			const entries: Array<{
-				shardId: string;
-				version: number;
-				state: unknown;
-			}> = [];
-
-			for (const [shardId, { state, version }] of shardStates) {
-				const clientVersion = clientVersions[shardId] ?? 0;
-				if (version > clientVersion) {
-					entries.push({ shardId, version, state });
-				}
-			}
-
-			if (entries.length > 0) {
-				transport?.send(connectionId, {
-					type: "state",
-					channelId,
-					kind,
-					shards: entries,
-				});
-			}
-		}
-
-		transport?.send(connectionId, { type: "ready" });
-		config.onConnect?.(pending.actor);
-	}
-
-	/** Route a client submit to the right channel, respond with ack/reject. */
-	async function handleSubmit(
-		connectionId: string,
-		message: {
-			channelId: string;
-			operationName: string;
-			input: unknown;
-			opId: string;
-		},
-	): Promise<void> {
-		const ch = channels.get(message.channelId);
-		if (!ch) {
-			transport?.send(connectionId, {
-				type: "reject",
-				opId: message.opId,
-				code: "INVALID_CHANNEL",
-				message: `Channel "${message.channelId}" is not registered`,
-			});
-			return;
-		}
-
-		const actor = actorRegistry.getActor(connectionId);
-		if (!actor) {
-			transport?.send(connectionId, {
-				type: "reject",
-				opId: message.opId,
-				code: "INTERNAL_ERROR",
-				message: "Connection has no associated actor",
-			});
-			return;
-		}
-
-		const result = await ch.submit({
-			operationName: message.operationName,
-			input: message.input,
-			actor,
-			opId: message.opId,
-		});
-
-		if (result.status === "acknowledged") {
-			transport?.send(connectionId, {
-				type: "acknowledge",
-				opId: message.opId,
-			});
-			await runAfterApplyHooks(
-				message.channelId,
-				result,
-				actor,
-				message.input,
-				0,
-			);
-		} else {
-			transport?.send(connectionId, {
-				type: "reject",
-				opId: message.opId,
-				code: result.code,
-				message: result.message,
-				shards: result.shards,
-			});
-		}
-	}
-
-	/** Clean up actor, unsubscribe from channels, notify consumer. */
-	function handleDisconnection(connectionId: string, reason: string): void {
-		const actor = actorRegistry.removeActor(connectionId);
-		pendingHandshakes.delete(connectionId);
-
-		for (const ch of channels.values()) {
-			ch.removeSubscriber(connectionId);
-		}
-
-		if (actor) {
-			config.onDisconnect?.(actor, reason);
-		}
-	}
-
-	// ── Wire transport to handlers ──────────────────────────────────
-
-	if (transport) {
-		transport.onConnection(async (connectionId, rawActor) => {
-			await handleConnection(connectionId, rawActor);
-		});
-
-		transport.onMessage(async (connectionId, message) => {
-			switch (message.type) {
-				case "versions":
-					handleClientVersions(connectionId, message.shards);
-					break;
-				case "submit":
-					await handleSubmit(connectionId, message);
-					break;
-			}
-		});
-
-		transport.onDisconnection((connectionId, reason) => {
-			handleDisconnection(connectionId, reason);
-		});
-	}
-
 	// ── afterApply hooks ────────────────────────────────────────────
 
 	const MAX_AFTER_APPLY_DEPTH = 10;
@@ -436,7 +215,14 @@ export function createServer<
 		}
 
 		const boundSubmit: AfterApplySubmitFn<TChannels> = (ch, op, submitInput) =>
-			internalSubmit(ch as string, op as string, submitInput, depth + 1);
+			internalSubmit(
+				ch as string,
+				op as string,
+				submitInput,
+				serverActor,
+				`server:${String(serverOpCounter++)}`,
+				depth + 1,
+			);
 
 		for (const handler of handlers) {
 			await handler({
@@ -450,7 +236,7 @@ export function createServer<
 		}
 	}
 
-	// ── Internal submit (shared by consumer API and transport handler) ──
+	// ── Internal submit (shared by consumer API and transport protocol) ──
 
 	let serverOpCounter = 0;
 
@@ -458,20 +244,42 @@ export function createServer<
 		channelName: string,
 		operationName: string,
 		input: unknown,
+		actor: BaseActor,
+		opId: string,
 		depth: number,
 	): Promise<PipelineResult> {
 		const ch = getChannelOrThrow(channelName);
-		const opId = `server:${String(serverOpCounter++)}`;
-		const result = await ch.submit({
-			operationName,
-			input,
-			actor: serverActor,
-			opId,
-		});
+		const result = await ch.submit({ operationName, input, actor, opId });
 		if (result.status === "acknowledged") {
-			await runAfterApplyHooks(channelName, result, serverActor, input, depth);
+			await runAfterApplyHooks(channelName, result, actor, input, depth);
 		}
 		return result;
+	}
+
+	// ── Transport protocol (only when transport is configured) ──────
+
+	const protocol = transport
+		? new TransportProtocol<TActor>({
+				transport,
+				actorRegistry,
+				channels,
+				submit: (channelName, submission) =>
+					getChannelOrThrow(channelName).submit(submission),
+				runAfterApply: (channelName, result, actor, input) =>
+					runAfterApplyHooks(channelName, result, actor, input, 0),
+				defaultSubscriptions: config.defaultSubscriptions,
+				onConnect: config.onConnect,
+				onDisconnect: config.onDisconnect,
+			})
+		: undefined;
+
+	function requireProtocol(): TransportProtocol<TActor> {
+		if (!protocol) {
+			throw new Error(
+				"addTransportSubscriber/removeTransportSubscriber require a transport to be configured",
+			);
+		}
+		return protocol;
 	}
 
 	// ── Consumer API ────────────────────────────────────────────────
@@ -482,6 +290,8 @@ export function createServer<
 				channelName as string,
 				operationName as string,
 				input,
+				serverActor,
+				`server:${String(serverOpCounter++)}`,
 				0,
 			);
 		},
@@ -502,13 +312,18 @@ export function createServer<
 		},
 
 		addTransportSubscriber(channelName, connectionId, shardIds) {
-			const ch = getChannelOrThrow(channelName);
-			ch.addSubscriber(createTransportSubscriber(connectionId), shardIds);
+			requireProtocol().addTransportSubscriber(
+				channelName as string,
+				connectionId,
+				shardIds,
+			);
 		},
 
 		removeTransportSubscriber(channelName, connectionId) {
-			const ch = getChannelOrThrow(channelName);
-			ch.removeSubscriber(connectionId);
+			requireProtocol().removeTransportSubscriber(
+				channelName as string,
+				connectionId,
+			);
 		},
 
 		getChannel(channelName) {
