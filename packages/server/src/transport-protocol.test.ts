@@ -65,7 +65,7 @@ function setupProtocol(
 			channelName: string,
 			submission: Submission,
 		) => Promise<PipelineResult>;
-		afterApplyCalls?: Array<{
+		afterCommitCalls?: Array<{
 			channelName: string;
 			actor: BaseActor;
 			input: unknown;
@@ -101,9 +101,9 @@ function setupProtocol(
 		actorRegistry,
 		channels,
 		submit: opts.submitOverride ?? defaultSubmit,
-		runAfterApply: async (channelName, _result, actor, input) => {
+		runAfterCommit: (channelName, _result, actor, input) => {
 			const latest = submitCalls[submitCalls.length - 1];
-			opts.afterApplyCalls?.push({
+			opts.afterCommitCalls?.push({
 				channelName,
 				actor,
 				input,
@@ -313,8 +313,8 @@ describe("TransportProtocol", () => {
 			expect(submitCalls[0]?.submission.operationName).toBe("advanceTurn");
 		});
 
-		test("runs afterApply after sending acknowledge", async () => {
-			const afterApplyCalls: Array<{
+		test("fires afterCommit after sending acknowledge", async () => {
+			const afterCommitCalls: Array<{
 				channelName: string;
 				actor: BaseActor;
 				input: unknown;
@@ -322,7 +322,7 @@ describe("TransportProtocol", () => {
 			}> = [];
 			const order: string[] = [];
 
-			const { client, connect, adapter } = setupProtocol({ afterApplyCalls });
+			const { client, connect, adapter } = setupProtocol({ afterCommitCalls });
 			await seedGame(adapter);
 
 			client.onMessage((msg) => {
@@ -342,11 +342,11 @@ describe("TransportProtocol", () => {
 			});
 			await new Promise((r) => setTimeout(r, 0));
 
-			expect(afterApplyCalls).toHaveLength(1);
-			expect(afterApplyCalls[0]?.channelName).toBe("game");
-			expect(afterApplyCalls[0]?.actor).toEqual({ actorId: "alice" });
-			expect(afterApplyCalls[0]?.input).toEqual({ hint: 1 });
-			expect(afterApplyCalls[0]?.opId).toBe("op-1");
+			expect(afterCommitCalls).toHaveLength(1);
+			expect(afterCommitCalls[0]?.channelName).toBe("game");
+			expect(afterCommitCalls[0]?.actor).toEqual({ actorId: "alice" });
+			expect(afterCommitCalls[0]?.input).toEqual({ hint: 1 });
+			expect(afterCommitCalls[0]?.opId).toBe("op-1");
 
 			expect(order[0]).toBe("ack");
 		});
@@ -358,7 +358,7 @@ describe("TransportProtocol", () => {
 				message: "boom",
 				shards: [{ shardId: "world", version: 99, state: {} }],
 			};
-			const afterApplyCalls: Array<{
+			const afterCommitCalls: Array<{
 				channelName: string;
 				actor: BaseActor;
 				input: unknown;
@@ -367,7 +367,7 @@ describe("TransportProtocol", () => {
 
 			const { client, connect } = setupProtocol({
 				submitOverride: async () => rejectResult,
-				afterApplyCalls,
+				afterCommitCalls,
 			});
 
 			const messages = collectClientMessages(client);
@@ -391,7 +391,7 @@ describe("TransportProtocol", () => {
 				expect(reject.message).toBe("boom");
 				expect(reject.shards).toHaveLength(1);
 			}
-			expect(afterApplyCalls).toHaveLength(0);
+			expect(afterCommitCalls).toHaveLength(0);
 		});
 
 		test("INVALID_CHANNEL reject for unknown channel, submit seam not called", async () => {

@@ -9,18 +9,18 @@ export interface TransportProtocolDeps<TActor extends BaseActor> {
 	readonly transport: ServerTransport;
 	readonly actorRegistry: ActorRegistry<TActor>;
 	readonly channels: ReadonlyMap<string, ChannelRuntime>;
-	/** Submit to a channel — returns the pipeline result without running afterApply hooks. */
+	/** Submit to a channel — returns the pipeline result without running afterCommit hooks. */
 	readonly submit: (
 		channelName: string,
 		submission: Submission,
 	) => Promise<PipelineResult>;
-	/** Run afterApply hooks for an acknowledged client operation (depth 0). */
-	readonly runAfterApply: (
+	/** Fire-and-forget afterCommit hooks for an acknowledged client operation. */
+	readonly runAfterCommit: (
 		channelName: string,
 		result: PipelineResult & { status: "acknowledged" },
 		actor: BaseActor,
 		input: unknown,
-	) => Promise<void>;
+	) => void;
 	readonly defaultSubscriptions?: (actor: TActor) => readonly SubscriptionRef[];
 	readonly onConnect?: (actor: TActor) => void;
 	readonly onDisconnect?: (actor: TActor, reason: string) => void;
@@ -41,7 +41,7 @@ interface PendingHandshake<TActor extends BaseActor> {
  * two-step handshake, submit routing, disconnect cleanup.
  *
  * Owns no domain state beyond the in-flight handshake map — all
- * state-changing work flows through the injected submit / runAfterApply
+ * state-changing work flows through the injected submit / runAfterCommit
  * callbacks and the provided actor/channel references.
  */
 export class TransportProtocol<TActor extends BaseActor> {
@@ -49,7 +49,7 @@ export class TransportProtocol<TActor extends BaseActor> {
 	private readonly actorRegistry: ActorRegistry<TActor>;
 	private readonly channels: ReadonlyMap<string, ChannelRuntime>;
 	private readonly submit: TransportProtocolDeps<TActor>["submit"];
-	private readonly runAfterApply: TransportProtocolDeps<TActor>["runAfterApply"];
+	private readonly runAfterCommit: TransportProtocolDeps<TActor>["runAfterCommit"];
 	private readonly defaultSubscriptions: TransportProtocolDeps<TActor>["defaultSubscriptions"];
 	private readonly onConnect: TransportProtocolDeps<TActor>["onConnect"];
 	private readonly onDisconnect: TransportProtocolDeps<TActor>["onDisconnect"];
@@ -63,7 +63,7 @@ export class TransportProtocol<TActor extends BaseActor> {
 		this.actorRegistry = deps.actorRegistry;
 		this.channels = deps.channels;
 		this.submit = deps.submit;
-		this.runAfterApply = deps.runAfterApply;
+		this.runAfterCommit = deps.runAfterCommit;
 		this.defaultSubscriptions = deps.defaultSubscriptions;
 		this.onConnect = deps.onConnect;
 		this.onDisconnect = deps.onDisconnect;
@@ -219,7 +219,7 @@ export class TransportProtocol<TActor extends BaseActor> {
 		this.onConnect?.(pending.actor);
 	}
 
-	/** Route a client submit to the right channel, respond with ack/reject, then run hooks. */
+	/** Route a client submit to the right channel, respond with ack/reject, then fire afterCommit hooks. */
 	private async handleSubmit(
 		connectionId: string,
 		message: {
@@ -262,7 +262,7 @@ export class TransportProtocol<TActor extends BaseActor> {
 				type: "acknowledge",
 				opId: message.opId,
 			});
-			await this.runAfterApply(message.channelId, result, actor, message.input);
+			this.runAfterCommit(message.channelId, result, actor, message.input);
 		} else {
 			this.transport.send(connectionId, {
 				type: "reject",

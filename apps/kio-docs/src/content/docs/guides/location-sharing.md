@@ -63,10 +63,10 @@ Notice that this operation says nothing about subscriptions. It records the inte
 
 ## Triggering subscription changes with hooks
 
-The `afterApply` hook runs after an operation's `apply` step completes successfully. This is where you connect your domain logic to the subscription system.
+The `afterCommit` hook runs after an operation's `apply` step completes successfully. This is where you connect your domain logic to the subscription system.
 
 ```ts
-server.hooks.afterApply("game", "startShare", (operation, oldStates, newStates, ctx) => {
+server.hooks.afterCommit("game", "startShare", (operation, oldStates, newStates, ctx) => {
   server.submit("subscriptions", "grant", {
     actorId: operation.input.targetPlayerId,
     ref: { channelId: "presence", shardId: `player:${ctx.actor.actorId}` },
@@ -79,7 +79,7 @@ When alice submits `startShare` with `targetPlayerId: "bob"`, the hook fires aft
 The reverse hook handles unsharing:
 
 ```ts
-server.hooks.afterApply("game", "stopShare", (operation, oldStates, newStates, ctx) => {
+server.hooks.afterCommit("game", "stopShare", (operation, oldStates, newStates, ctx) => {
   server.submit("subscriptions", "revoke", {
     actorId: operation.input.targetPlayerId,
     ref: { channelId: "presence", shardId: `player:${ctx.actor.actorId}` },
@@ -140,7 +140,7 @@ Here is the complete flow when alice shares her location with bob:
 
 1. **Alice submits `startShare`** with `targetPlayerId: "bob"`. The server validates and applies the operation to the game channel.
 
-2. **The `afterApply` hook fires.** The server submits `subscriptions/grant`, adding `{ channelId: "presence", shardId: "player:alice" }` to bob's subscription shard.
+2. **The `afterCommit` hook fires.** The server submits `subscriptions/grant`, adding `{ channelId: "presence", shardId: "player:alice" }` to bob's subscription shard.
 
 3. **Bob's subscription shard updates.** The engine broadcasts the change to bob. His `LocationSharingPanel` re-renders, now including alice's shard ID in the list.
 
@@ -148,7 +148,7 @@ Here is the complete flow when alice shares her location with bob:
 
 5. **Alice's GPS updates flow normally.** Her presence shard updates through the standard broadcast pipeline. Bob receives them because he's now a subscriber. The map marker moves.
 
-6. **Alice stops sharing.** She submits `stopShare`. The `afterApply` hook fires `subscriptions/revoke`, removing alice's presence ref from bob's subscription shard. Bob's `LocationSharingPanel` re-renders without alice's shard ID. The `SharedPlayerLocation` component unmounts. The ShardStore returns to `"unavailable"`.
+6. **Alice stops sharing.** She submits `stopShare`. The `afterCommit` hook fires `subscriptions/revoke`, removing alice's presence ref from bob's subscription shard. Bob's `LocationSharingPanel` re-renders without alice's shard ID. The `SharedPlayerLocation` component unmounts. The ShardStore returns to `"unavailable"`.
 
 ## Why this works without point-to-point messaging
 

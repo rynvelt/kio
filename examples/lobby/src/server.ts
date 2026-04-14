@@ -42,7 +42,7 @@ async function main() {
 	}
 
 	// React to setReady — check if all players are ready for countdown
-	server.afterApply("lobby", "setReady", async ({ newState, submit }) => {
+	server.afterCommit("lobby", "setReady", async ({ newState, submit }) => {
 		const room = newState.room as RoomState;
 
 		const readyCount = room.players.filter((p) => p.ready).length;
@@ -78,7 +78,7 @@ async function main() {
 	});
 
 	// React to leave — cancel countdown timer if active
-	server.afterApply("lobby", "leave", ({ newState }) => {
+	server.afterCommit("lobby", "leave", ({ newState }) => {
 		const room = newState.room as RoomState;
 		if (room.phase !== "countdown" && countdownTimer) {
 			clearTimeout(countdownTimer);

@@ -123,7 +123,7 @@ React hooks, Vue composables, Svelte stores -- these are separate packages that 
 
 ### Event sourcing
 
-Kio is a state-transfer system, not an event-sourced one. If you want an event log, you can build one using the `afterApply` hook combined with your persistence adapter. Kio does not manage event streams, projections, or replay.
+Kio is a state-transfer system, not an event-sourced one. If you want an event log, you can build one using the `afterCommit` hook combined with your persistence adapter. Kio does not manage event streams, projections, or replay.
 
 ### Custom DSL
 

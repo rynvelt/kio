@@ -12,8 +12,10 @@ export type {
 	Submission,
 } from "./pipeline";
 export type {
-	AfterApplyContext,
-	AfterApplyHandler,
+	AfterCommitContext,
+	AfterCommitErrorContext,
+	AfterCommitHandler,
+	OnAfterCommitError,
 	Server,
 	ServerConfig,
 	SubscriptionRef,

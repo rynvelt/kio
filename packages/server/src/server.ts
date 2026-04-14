@@ -19,6 +19,31 @@ export interface SubscriptionRef {
 	readonly shardIds: readonly string[];
 }
 
+/** Context passed to the onAfterCommitError handler */
+export interface AfterCommitErrorContext {
+	readonly channelName: string;
+	readonly operationName: string;
+	readonly actor: BaseActor;
+	readonly input: unknown;
+	readonly opId: string;
+}
+
+/** Reports errors thrown from afterCommit hooks. Hooks run fire-and-forget; this is the only observation point. */
+export type OnAfterCommitError = (
+	error: unknown,
+	ctx: AfterCommitErrorContext,
+) => void;
+
+function defaultOnAfterCommitError(
+	error: unknown,
+	ctx: AfterCommitErrorContext,
+): void {
+	console.error(
+		`[kio] afterCommit error in ${ctx.channelName}.${ctx.operationName}:`,
+		error,
+	);
+}
+
 /** Configuration for createServer — TActor is inferred from the engine builder */
 export interface ServerConfig<TActor extends BaseActor = BaseActor> {
 	readonly persistence: StateAdapter;
@@ -27,6 +52,7 @@ export interface ServerConfig<TActor extends BaseActor = BaseActor> {
 	readonly defaultSubscriptions?: (actor: TActor) => readonly SubscriptionRef[];
 	readonly onConnect?: (actor: TActor) => void;
 	readonly onDisconnect?: (actor: TActor, reason: string) => void;
+	readonly onAfterCommitError?: OnAfterCommitError;
 }
 
 /** Extract operation names from a ChannelBuilder's Ops type */
@@ -85,22 +111,27 @@ export interface Server<TChannels extends object = object> {
 
 	getChannel(channelName: string & keyof TChannels): ChannelRuntime | undefined;
 
-	/** Register a hook that runs after an operation is successfully applied */
-	afterApply<
+	/**
+	 * Register a hook that runs after an operation has been applied and persisted
+	 * (i.e., after commit). Runs fire-and-forget — hook success/failure does not
+	 * affect the op's acknowledge or broadcast. Errors are routed to
+	 * `ServerConfig.onAfterCommitError`.
+	 */
+	afterCommit<
 		CName extends string & keyof TChannels,
 		OpName extends OperationNames<TChannels[CName]>,
 	>(
 		channelName: CName,
 		operationName: OpName,
-		handler: AfterApplyHandler<
+		handler: AfterCommitHandler<
 			OperationInput<TChannels[CName], OpName>,
 			TChannels
 		>,
 	): void;
 }
 
-/** Submit function available inside afterApply — same signature as Server.submit */
-type AfterApplySubmitFn<TChannels extends object> = <
+/** Submit function available inside afterCommit — same signature as Server.submit */
+type AfterCommitSubmitFn<TChannels extends object> = <
 	CName extends string & keyof TChannels,
 	OpName extends OperationNames<TChannels[CName]>,
 >(
@@ -109,8 +140,8 @@ type AfterApplySubmitFn<TChannels extends object> = <
 	input: OperationInput<TChannels[CName], OpName>,
 ) => Promise<PipelineResult>;
 
-/** Context passed to afterApply handlers */
-export interface AfterApplyContext<
+/** Context passed to afterCommit handlers */
+export interface AfterCommitContext<
 	TInput = unknown,
 	TChannels extends object = object,
 > {
@@ -121,14 +152,14 @@ export interface AfterApplyContext<
 	/** Post-apply shard state keyed by shardId — captured during apply, not affected by concurrent operations */
 	readonly newState: Readonly<Record<string, unknown>>;
 	/** Submit another operation (depth-tracked to prevent infinite loops) */
-	readonly submit: AfterApplySubmitFn<TChannels>;
+	readonly submit: AfterCommitSubmitFn<TChannels>;
 }
 
-/** Handler function for afterApply hooks */
-export type AfterApplyHandler<
+/** Handler function for afterCommit hooks */
+export type AfterCommitHandler<
 	TInput = unknown,
 	TChannels extends object = object,
-> = (ctx: AfterApplyContext<TInput, TChannels>) => void | Promise<void>;
+> = (ctx: AfterCommitContext<TInput, TChannels>) => void | Promise<void>;
 
 // ── createServer ────────────────────────────────────────────────────
 
@@ -144,6 +175,8 @@ export function createServer<
 	const serverActor: BaseActor = engineBuilder["~serverActor"] ?? {
 		actorId: "__kio:server__",
 	};
+	const onAfterCommitError: OnAfterCommitError =
+		config.onAfterCommitError ?? defaultOnAfterCommitError;
 
 	// Setup: create channel runtimes
 	for (const [name, channelData] of engineBuilder["~channels"]) {
@@ -168,25 +201,25 @@ export function createServer<
 		return ch;
 	}
 
-	// ── afterApply hooks ────────────────────────────────────────────
+	// ── afterCommit hooks ───────────────────────────────────────────
 
-	const MAX_AFTER_APPLY_DEPTH = 10;
+	const MAX_AFTER_COMMIT_DEPTH = 10;
 
 	/** Map<channelName, Map<operationName, handler[]>> */
-	const afterApplyHooks = new Map<
+	const afterCommitHooks = new Map<
 		string,
-		Map<string, AfterApplyHandler<unknown, TChannels>[]>
+		Map<string, AfterCommitHandler<unknown, TChannels>[]>
 	>();
 
-	function registerAfterApply(
+	function registerAfterCommit(
 		channelName: string,
 		operationName: string,
-		handler: AfterApplyHandler<unknown, TChannels>,
+		handler: AfterCommitHandler<unknown, TChannels>,
 	): void {
-		let channelHooks = afterApplyHooks.get(channelName);
+		let channelHooks = afterCommitHooks.get(channelName);
 		if (!channelHooks) {
 			channelHooks = new Map();
-			afterApplyHooks.set(channelName, channelHooks);
+			afterCommitHooks.set(channelName, channelHooks);
 		}
 		let opHooks = channelHooks.get(operationName);
 		if (!opHooks) {
@@ -196,25 +229,25 @@ export function createServer<
 		opHooks.push(handler);
 	}
 
-	async function runAfterApplyHooks(
+	async function runAfterCommitHooks(
 		channelName: string,
 		result: PipelineResult & { status: "acknowledged" },
 		actor: BaseActor,
 		input: unknown,
 		depth: number,
 	): Promise<void> {
-		const handlers = afterApplyHooks
+		const handlers = afterCommitHooks
 			.get(channelName)
 			?.get(result.operationName);
 		if (!handlers || handlers.length === 0) return;
 
-		if (depth >= MAX_AFTER_APPLY_DEPTH) {
+		if (depth >= MAX_AFTER_COMMIT_DEPTH) {
 			throw new Error(
-				`afterApply depth limit exceeded (${String(MAX_AFTER_APPLY_DEPTH)}) — possible infinite loop`,
+				`afterCommit depth limit exceeded (${String(MAX_AFTER_COMMIT_DEPTH)}) — possible infinite loop`,
 			);
 		}
 
-		const boundSubmit: AfterApplySubmitFn<TChannels> = (ch, op, submitInput) =>
+		const boundSubmit: AfterCommitSubmitFn<TChannels> = (ch, op, submitInput) =>
 			internalSubmit(
 				ch as string,
 				op as string,
@@ -236,6 +269,27 @@ export function createServer<
 		}
 	}
 
+	/** Fire-and-forget hook execution. Hooks never block commit, ack, or broadcast. */
+	function fireAfterCommit(
+		channelName: string,
+		result: PipelineResult & { status: "acknowledged" },
+		actor: BaseActor,
+		input: unknown,
+		depth: number,
+	): void {
+		runAfterCommitHooks(channelName, result, actor, input, depth).catch(
+			(err) => {
+				onAfterCommitError(err, {
+					channelName,
+					operationName: result.operationName,
+					actor,
+					input,
+					opId: result.opId,
+				});
+			},
+		);
+	}
+
 	// ── Internal submit (shared by consumer API and transport protocol) ──
 
 	let serverOpCounter = 0;
@@ -251,7 +305,7 @@ export function createServer<
 		const ch = getChannelOrThrow(channelName);
 		const result = await ch.submit({ operationName, input, actor, opId });
 		if (result.status === "acknowledged") {
-			await runAfterApplyHooks(channelName, result, actor, input, depth);
+			fireAfterCommit(channelName, result, actor, input, depth);
 		}
 		return result;
 	}
@@ -265,8 +319,9 @@ export function createServer<
 				channels,
 				submit: (channelName, submission) =>
 					getChannelOrThrow(channelName).submit(submission),
-				runAfterApply: (channelName, result, actor, input) =>
-					runAfterApplyHooks(channelName, result, actor, input, 0),
+				runAfterCommit: (channelName, result, actor, input) => {
+					fireAfterCommit(channelName, result, actor, input, 0);
+				},
 				defaultSubscriptions: config.defaultSubscriptions,
 				onConnect: config.onConnect,
 				onDisconnect: config.onDisconnect,
@@ -330,11 +385,11 @@ export function createServer<
 			return channels.get(channelName);
 		},
 
-		afterApply(channelName, operationName, handler) {
-			registerAfterApply(
+		afterCommit(channelName, operationName, handler) {
+			registerAfterCommit(
 				channelName as string,
 				operationName as string,
-				handler as AfterApplyHandler<unknown, TChannels>,
+				handler as AfterCommitHandler<unknown, TChannels>,
 			);
 		},
 	} as Server<TChannels>;

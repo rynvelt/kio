@@ -152,14 +152,14 @@ beforeApply(operation, shardStates, ctx) {
 
 If `beforeApply` throws, the operation is rejected. `apply()` never runs.
 
-### `afterApply(operation, oldStates, newStates, ctx)`
+### `afterCommit(operation, oldStates, newStates, ctx)`
 
 Called after `apply()` has run and the new shard states have been computed (but before persistence and broadcast). Receives both old and new states for comparison.
 
 This is the right place for side effects that should happen in response to state changes: audit logging, analytics events, triggering operations on other channels, or notifying external systems.
 
 ```ts
-afterApply(operation, oldStates, newStates, ctx) {
+afterCommit(operation, oldStates, newStates, ctx) {
   if (operation.name === "finishGame") {
     analytics.track("game_completed", {
       roomId: ctx.channelId,
@@ -169,7 +169,7 @@ afterApply(operation, oldStates, newStates, ctx) {
 }
 ```
 
-If `afterApply` throws, the engine logs the error but does not reject the operation — the state change has already been computed. The operation proceeds to persistence and broadcast. This prevents side-effect failures from blocking gameplay.
+If `afterCommit` throws, the engine logs the error but does not reject the operation — the state change has already been computed. The operation proceeds to persistence and broadcast. This prevents side-effect failures from blocking gameplay.
 
 ## Serialization
 

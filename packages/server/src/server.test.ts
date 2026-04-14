@@ -10,7 +10,7 @@ import {
 import { createDirectTransport, expectToBeDefined } from "@kio/shared/test";
 import * as v from "valibot";
 import { MemoryStateAdapter } from "./persistence";
-import { createServer } from "./server";
+import { type AfterCommitErrorContext, createServer } from "./server";
 
 function createSubscriber(
 	id: string,
@@ -509,6 +509,165 @@ describe("createServer", () => {
 				// @ts-expect-error: "nonexistent" is not a valid channel
 				server.broadcastDirtyShards("nonexistent");
 			}).toThrow('Channel "nonexistent" is not registered');
+		});
+	});
+
+	describe("afterCommit (fire-and-forget)", () => {
+		async function seedGame(adapter: MemoryStateAdapter) {
+			await adapter.compareAndSwap("game", "world", 0, {
+				stage: "PLAYING",
+				turn: 0,
+			});
+		}
+
+		test("hook throw does not affect acknowledge status (server path)", async () => {
+			const adapter = new MemoryStateAdapter();
+			await seedGame(adapter);
+
+			const server = createServer(setupServerEngine(), {
+				persistence: adapter,
+				onAfterCommitError: () => {},
+			});
+			server.afterCommit("game", "advanceTurn", () => {
+				throw new Error("hook fail");
+			});
+
+			const result = await server.submit("game", "advanceTurn", {});
+			expect(result.status).toBe("acknowledged");
+		});
+
+		test("hook throw routes to onAfterCommitError with context", async () => {
+			const adapter = new MemoryStateAdapter();
+			await seedGame(adapter);
+
+			const errors: Array<{
+				error: unknown;
+				ctx: AfterCommitErrorContext;
+			}> = [];
+			const server = createServer(setupServerEngine(), {
+				persistence: adapter,
+				onAfterCommitError: (error, ctx) => errors.push({ error, ctx }),
+			});
+			server.afterCommit("game", "advanceTurn", () => {
+				throw new Error("hook fail");
+			});
+
+			await server.submit("game", "advanceTurn", {});
+			// Hook is fire-and-forget; drain microtasks
+			await new Promise((r) => setTimeout(r, 0));
+
+			expect(errors).toHaveLength(1);
+			expect((errors[0]?.error as Error).message).toBe("hook fail");
+			expect(errors[0]?.ctx.channelName).toBe("game");
+			expect(errors[0]?.ctx.operationName).toBe("advanceTurn");
+			expect(errors[0]?.ctx.input).toEqual({});
+			expect(errors[0]?.ctx.actor.actorId).toBe("__kio:server__");
+			expect(errors[0]?.ctx.opId).toMatch(/^server:/);
+		});
+
+		test("Server.submit does not await the hook's async work", async () => {
+			const adapter = new MemoryStateAdapter();
+			await seedGame(adapter);
+
+			let hookFinished = false;
+			let resolveHook!: () => void;
+			const hookFinishedSignal = new Promise<void>((r) => {
+				resolveHook = r;
+			});
+
+			const server = createServer(setupServerEngine(), {
+				persistence: adapter,
+			});
+			server.afterCommit("game", "advanceTurn", async () => {
+				await new Promise((r) => setTimeout(r, 20));
+				hookFinished = true;
+				resolveHook();
+			});
+
+			await server.submit("game", "advanceTurn", {});
+			expect(hookFinished).toBe(false);
+
+			await hookFinishedSignal;
+			expect(hookFinished).toBe(true);
+		});
+
+		test("depth-limit error is reported via onAfterCommitError, not thrown from Server.submit", async () => {
+			const adapter = new MemoryStateAdapter();
+			await seedGame(adapter);
+
+			const errors: Array<{
+				error: unknown;
+				ctx: AfterCommitErrorContext;
+			}> = [];
+			const server = createServer(setupServerEngine(), {
+				persistence: adapter,
+				onAfterCommitError: (error, ctx) => errors.push({ error, ctx }),
+			});
+			// Infinite self-chain
+			server.afterCommit("game", "advanceTurn", async ({ submit }) => {
+				await submit("game", "advanceTurn", {});
+			});
+
+			// Should resolve normally; depth limit surfaces as an async error
+			const result = await server.submit("game", "advanceTurn", {});
+			expect(result.status).toBe("acknowledged");
+
+			// Wait long enough for the chain to unwind to the depth limit
+			await new Promise((r) => setTimeout(r, 50));
+
+			const depthErr = errors.find((e) =>
+				(e.error as Error).message?.includes("depth limit"),
+			);
+			expect(depthErr).toBeDefined();
+		});
+
+		test("client path: hook throw does not affect acknowledge, routes to onAfterCommitError", async () => {
+			const adapter = new MemoryStateAdapter();
+			await seedGame(adapter);
+
+			const errors: Array<{
+				error: unknown;
+				ctx: AfterCommitErrorContext;
+			}> = [];
+			const {
+				client,
+				server: serverTransport,
+				connect,
+			} = createDirectTransport();
+			const server = createServer(setupServerEngine(), {
+				persistence: adapter,
+				transport: serverTransport,
+				onAfterCommitError: (error, ctx) => errors.push({ error, ctx }),
+			});
+			server.afterCommit("game", "advanceTurn", () => {
+				throw new Error("hook fail");
+			});
+
+			const received: ServerMessage[] = [];
+			client.onMessage((msg) => received.push(msg));
+
+			connect({ actorId: "alice" });
+			await new Promise((r) => setTimeout(r, 10));
+			client.send({ type: "versions", shards: {} });
+
+			client.send({
+				type: "submit",
+				channelId: "game",
+				operationName: "advanceTurn",
+				input: {},
+				opId: "op-1",
+			});
+
+			await new Promise((r) => setTimeout(r, 10));
+
+			const ack = received.find((m) => m.type === "acknowledge");
+			expectToBeDefined(ack);
+			if (ack.type === "acknowledge") {
+				expect(ack.opId).toBe("op-1");
+			}
+			expect(errors).toHaveLength(1);
+			expect(errors[0]?.ctx.opId).toBe("op-1");
+			expect(errors[0]?.ctx.channelName).toBe("game");
 		});
 	});
 });
