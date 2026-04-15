@@ -96,7 +96,12 @@ export function createSubscriptionsChannel(
 	// then resolve against one signature and the chain types normally.
 	// (See the SubscriptionsChannel TODO above for the deeper fix.)
 	return createChannelBuilder(options.kind, "subscriptions")
-		.shardPerResource("subscription", subscriptionShardStateSchema)
+		.shardPerResource("subscription", subscriptionShardStateSchema, {
+			// Materialize a fresh empty ref set the first time a given actor's
+			// shard is touched — grant/revoke apply can then treat `refs` as
+			// always-present and never needs to initialize it itself.
+			defaultState: { refs: [] },
+		})
 		.operation("grant", {
 			execution: "confirmed",
 			versionChecked: true,

@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { channel, shard } from "@kio/shared";
+import {
+	channel,
+	createSubscriptionsChannel,
+	KIO_SERVER_ACTOR_ID,
+	shard,
+} from "@kio/shared";
 import { expectToBeDefined } from "@kio/shared/test";
 import * as v from "valibot";
 import { MemoryStateAdapter } from "./persistence";
@@ -786,6 +791,148 @@ describe("OperationPipeline", () => {
 
 			expect(result.status).toBe("acknowledged");
 			expect(authorizeCalled).toBe(false);
+		});
+	});
+
+	describe("subscriptions channel (integration)", () => {
+		function setupSubscriptions() {
+			const ch = createSubscriptionsChannel({ kind: "ephemeral" });
+			const data = ch["~data"];
+			const adapter = new MemoryStateAdapter();
+			const stateManager = new ShardStateManager(
+				"subscriptions",
+				data.shardDefs,
+				adapter,
+			);
+			const pipeline = new OperationPipeline(data, stateManager, {
+				serverActorId: KIO_SERVER_ACTOR_ID,
+			});
+			return { stateManager, pipeline };
+		}
+
+		const serverActor: Actor = { actorId: KIO_SERVER_ACTOR_ID };
+		const aliceRef = {
+			channelId: "presence",
+			shardId: "player:alice",
+		} as const;
+		const carolRef = {
+			channelId: "presence",
+			shardId: "player:carol",
+		} as const;
+
+		test("grant materializes a fresh shard from defaultState", async () => {
+			const { stateManager, pipeline } = setupSubscriptions();
+
+			const result = await pipeline.submit({
+				operationName: "grant",
+				input: { actorId: "bob", ref: aliceRef },
+				actor: serverActor,
+				opId: nextOpId(),
+			});
+
+			expect(result.status).toBe("acknowledged");
+
+			const bobShard = stateManager.getCached("subscription:bob");
+			expect(bobShard?.state).toEqual({ refs: [aliceRef] });
+			expect(bobShard?.version).toBe(1);
+		});
+
+		test("grant is idempotent — repeated ref is not duplicated", async () => {
+			const { stateManager, pipeline } = setupSubscriptions();
+
+			await pipeline.submit({
+				operationName: "grant",
+				input: { actorId: "bob", ref: aliceRef },
+				actor: serverActor,
+				opId: nextOpId(),
+			});
+			await pipeline.submit({
+				operationName: "grant",
+				input: { actorId: "bob", ref: aliceRef },
+				actor: serverActor,
+				opId: nextOpId(),
+			});
+
+			const bobShard = stateManager.getCached("subscription:bob");
+			expect((bobShard?.state as { refs: unknown[] }).refs).toHaveLength(1);
+		});
+
+		test("grant accumulates distinct refs", async () => {
+			const { stateManager, pipeline } = setupSubscriptions();
+
+			await pipeline.submit({
+				operationName: "grant",
+				input: { actorId: "bob", ref: aliceRef },
+				actor: serverActor,
+				opId: nextOpId(),
+			});
+			await pipeline.submit({
+				operationName: "grant",
+				input: { actorId: "bob", ref: carolRef },
+				actor: serverActor,
+				opId: nextOpId(),
+			});
+
+			const bobShard = stateManager.getCached("subscription:bob");
+			expect((bobShard?.state as { refs: unknown[] }).refs).toEqual([
+				aliceRef,
+				carolRef,
+			]);
+		});
+
+		test("revoke removes a matching ref", async () => {
+			const { stateManager, pipeline } = setupSubscriptions();
+
+			await pipeline.submit({
+				operationName: "grant",
+				input: { actorId: "bob", ref: aliceRef },
+				actor: serverActor,
+				opId: nextOpId(),
+			});
+			await pipeline.submit({
+				operationName: "grant",
+				input: { actorId: "bob", ref: carolRef },
+				actor: serverActor,
+				opId: nextOpId(),
+			});
+			const result = await pipeline.submit({
+				operationName: "revoke",
+				input: { actorId: "bob", ref: aliceRef },
+				actor: serverActor,
+				opId: nextOpId(),
+			});
+
+			expect(result.status).toBe("acknowledged");
+			const bobShard = stateManager.getCached("subscription:bob");
+			expect((bobShard?.state as { refs: unknown[] }).refs).toEqual([carolRef]);
+		});
+
+		test("revoke is a no-op when the ref is absent (still acknowledged)", async () => {
+			const { pipeline } = setupSubscriptions();
+
+			const result = await pipeline.submit({
+				operationName: "revoke",
+				input: { actorId: "bob", ref: aliceRef },
+				actor: serverActor,
+				opId: nextOpId(),
+			});
+			expect(result.status).toBe("acknowledged");
+		});
+
+		test("client submission of grant is rejected with SERVER_ONLY_OPERATION", async () => {
+			const { pipeline } = setupSubscriptions();
+
+			const result = await pipeline.submit({
+				operationName: "grant",
+				input: { actorId: "bob", ref: aliceRef },
+				actor: { actorId: "player:alice" },
+				opId: nextOpId(),
+			});
+
+			expect(result.status).toBe("rejected");
+			if (result.status === "rejected") {
+				expect(result.code).toBe("SERVER_ONLY_OPERATION");
+			}
 		});
 	});
 });

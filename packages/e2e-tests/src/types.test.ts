@@ -703,3 +703,40 @@ type _30b = Expect<
 // surfaces at the next call site.
 // @ts-expect-error: Property 'channel' does not exist on ChannelActorMismatch
 _mismatchResult.channel(_kioChannel);
+
+// ── 31. Built-in subscriptions channel composes with any engine ─────
+//
+// Because `engine.channel()` is contravariant (Section 30), the
+// subscriptions channel (typed with BaseActor) works with a bare
+// `engine()` AND with a `defineApp(...)` engine that has a richer actor.
+// Consumers never parameterize the factory — the default type just fits.
+
+import { createSubscriptionsChannel } from "@kio/shared";
+
+const _subChannel = createSubscriptionsChannel({ kind: "ephemeral" });
+
+// Positive: add to a bare engine.
+const _bareEngineWithSubs = engine().channel(_subChannel);
+type _31a = Expect<
+	Equal<
+		typeof _bareEngineWithSubs extends ChannelActorMismatch<unknown, unknown>
+			? false
+			: true,
+		true
+	>
+>;
+
+// Positive: add to a defineApp engine with custom actor { actorId, name }.
+const _kioEngineWithSubs = kio.engine().channel(_subChannel);
+type _31b = Expect<
+	Equal<
+		typeof _kioEngineWithSubs extends ChannelActorMismatch<unknown, unknown>
+			? false
+			: true,
+		true
+	>
+>;
+
+// Positive: chaining another channel after subscriptions works (proves
+// the return is a real EngineBuilder, not an error type).
+_kioEngineWithSubs.channel(_kioChannel);
