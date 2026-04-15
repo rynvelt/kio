@@ -87,7 +87,7 @@ import { gameChannel, presenceChannel } from "./schema"
 import { engine } from "kio/core"
 
 export const serverEngine = engine()
-  .channel(
+  .register(
     gameChannel
       .serverImpl("useItem", {
         validate({ seat }, input, ctx, { reject }) {     // ✓ server-only
@@ -109,7 +109,7 @@ export const serverEngine = engine()
         },
       })
   )
-  .channel(presenceChannel)
+  .register(presenceChannel)
 ```
 
 The type system knows that `useItem` already has `apply()` in the shared schema, so providing it again in `serverImpl` is a compile error. Conversely, `rollDice` is computed, so `apply()` is required here — omitting it is a compile error.
@@ -123,7 +123,7 @@ import { gameChannel, presenceChannel } from "./schema"
 import { engine } from "kio/core"
 
 export const clientEngine = engine()
-  .channel(
+  .register(
     gameChannel
       .clientImpl("useItem", {
         canRetry(input, { seat }) {                      // ✓ client-only
@@ -131,7 +131,7 @@ export const clientEngine = engine()
         },
       })
   )
-  .channel(presenceChannel)
+  .register(presenceChannel)
 ```
 
 ### Entrypoints

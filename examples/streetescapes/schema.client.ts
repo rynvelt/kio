@@ -2,7 +2,7 @@ import { engine } from "@kio/shared";
 import { fogChannel, gameChannel, presenceChannel } from "./schema";
 
 export const clientEngine = engine()
-	.channel(
+	.register(
 		gameChannel
 			.clientImpl("useItem", {
 				canRetry(input, freshShards) {
@@ -26,5 +26,5 @@ export const clientEngine = engine()
 				},
 			}),
 	)
-	.channel(presenceChannel)
-	.channel(fogChannel);
+	.register(presenceChannel)
+	.register(fogChannel);

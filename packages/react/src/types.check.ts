@@ -38,7 +38,7 @@ const presenceChannel = channel
 		},
 	});
 
-const appEngine = engine().channel(counterChannel).channel(presenceChannel);
+const appEngine = engine().register(counterChannel).register(presenceChannel);
 
 const { useShardState, useSubmit } = createKioHooks<typeof appEngine>();
 

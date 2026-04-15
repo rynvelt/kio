@@ -56,7 +56,7 @@ function setupServerEngine() {
 			},
 		});
 
-	const serverEngine = engine().channel(gameChannel).channel(presenceChannel);
+	const serverEngine = engine().register(gameChannel).register(presenceChannel);
 
 	return serverEngine;
 }

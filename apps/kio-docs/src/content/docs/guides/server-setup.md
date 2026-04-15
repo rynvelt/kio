@@ -27,11 +27,11 @@ import { gameChannel, presenceChannel } from "./schema"
 import { engine } from "kio/core"
 
 export const serverEngine = engine()
-  .channel(
+  .register(
     gameChannel
       // server implementations chained here
   )
-  .channel(presenceChannel)
+  .register(presenceChannel)
 ```
 
 The `engine()` builder collects all channels with their server implementations into a single engine definition. This is what you pass to `createServer()` later.
@@ -142,7 +142,7 @@ Both `seat(input.fromSeatId)` and `seat(input.toSeatId)` are available because t
 Ephemeral channels with only optimistic operations may not need any server-side implementations — the shared `apply()` is sufficient. In that case, pass the channel directly:
 
 ```ts
-  .channel(presenceChannel)
+  .register(presenceChannel)
 ```
 
 If an ephemeral channel does have operations that need server validation, you chain `.serverImpl()` the same way as with durable channels.
@@ -156,7 +156,7 @@ import { gameChannel, presenceChannel } from "./schema"
 import { engine } from "kio/core"
 
 export const serverEngine = engine()
-  .channel(
+  .register(
     gameChannel
       .serverImpl("visitLocation", {
         validate({ seat }, input, ctx, { reject }) {
@@ -215,7 +215,7 @@ export const serverEngine = engine()
         },
       })
   )
-  .channel(presenceChannel)
+  .register(presenceChannel)
 ```
 
 ## Creating the server

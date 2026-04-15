@@ -44,7 +44,7 @@ import { gameChannel, presenceChannel } from "./schema"
 import { engine } from "kio/core"
 
 export const clientEngine = engine()
-  .channel(
+  .register(
     gameChannel
       .clientImpl("useItem", {
         canRetry(input, { seat }) {
@@ -63,7 +63,7 @@ export const clientEngine = engine()
       })
       // rollDice, chooseDialogueOption: no clientImpl needed (no canRetry)
   )
-  .channel(presenceChannel)
+  .register(presenceChannel)
 ```
 
 A few things to notice:

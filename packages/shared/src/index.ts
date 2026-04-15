@@ -23,13 +23,13 @@ export type {
 export { channel, createChannelBuilder } from "./channel";
 export type { Codec } from "./codec";
 export { jsonCodec } from "./codec";
-export type { AppDefinition, DefineAppConfig } from "./define-app";
-export { defineApp } from "./define-app";
 export { createDirectTransport } from "./direct-transport";
 export type {
 	BaseActor,
 	ChannelActorMismatch,
+	ChannelFactory,
 	EngineBuilder,
+	EngineOptions,
 	InferActor,
 	InferChannels,
 } from "./engine";

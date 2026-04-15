@@ -1,4 +1,4 @@
-import { defineApp } from "@kio/shared";
+import { engine, KIO_SERVER_ACTOR_ID } from "@kio/shared";
 import * as v from "valibot";
 
 const actorSchema = v.object({
@@ -8,9 +8,9 @@ const actorSchema = v.object({
 
 export type Actor = v.InferOutput<typeof actorSchema>;
 
-const kio = defineApp({
+const kio = engine({
 	actor: actorSchema,
-	serverActor: { actorId: "__kio:server__", name: "Server" },
+	serverActor: { actorId: KIO_SERVER_ACTOR_ID, name: "Server" },
 });
 
 const roomState = v.object({
@@ -95,6 +95,6 @@ export const lobbyChannel = kio.channel
 		},
 	});
 
-export const appEngine = kio.engine().channel(lobbyChannel);
+export const appEngine = kio.register(lobbyChannel);
 
 export { kio };

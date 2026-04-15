@@ -492,11 +492,11 @@ const presChannel = channel
 	});
 
 const _serverEngine = engine()
-	.channel(gameChannelForEngine)
-	.channel(presChannel);
+	.register(gameChannelForEngine)
+	.register(presChannel);
 const _clientEngine = engine()
-	.channel(gameChannelForEngine)
-	.channel(presChannel);
+	.register(gameChannelForEngine)
+	.register(presChannel);
 
 // ── 24. SubmitResult discriminated union ─────────────────────────────
 
@@ -527,7 +527,7 @@ function _handleShardState(s: ShardState<{ items: string[] }>) {
 
 const _serverForTypes = createServer(
 	engine()
-		.channel(
+		.register(
 			channel
 				.durable("game")
 				.shard("world", v.object({ turn: v.number() }))
@@ -540,7 +540,7 @@ const _serverForTypes = createServer(
 					},
 				}),
 		)
-		.channel(
+		.register(
 			channel
 				.ephemeral("presence")
 				.shardPerResource("player", v.object({ online: v.boolean() }))
@@ -569,21 +569,20 @@ _serverForTypes.submit("presence", "setOnline", { playerId: 123 });
 // @ts-expect-error: missing required field for setOnline
 _serverForTypes.submit("presence", "setOnline", {});
 
-// ── 27. defineApp creates pre-typed builders ────────────────────────
+// ── 27. engine(options) creates a pre-typed builder ─────────────────
 
-import { defineApp, type InferActor } from "@kio/shared";
+import type { InferActor } from "@kio/shared";
 
-const kio = defineApp({
+const kio = engine({
 	actor: v.object({ actorId: v.string(), name: v.string() }),
 	serverActor: { actorId: "__kio:server__", name: "System" },
 });
 
 // InferActor extracts the actor type from an engine builder
-const _kioEngine = kio.engine();
-type _KioActor = InferActor<typeof _kioEngine>;
+type _KioActor = InferActor<typeof kio>;
 type _27a = Expect<Equal<_KioActor, { actorId: string; name: string }>>;
 
-defineApp({
+engine({
 	actor: v.object({ actorId: v.string(), name: v.string() }),
 	// @ts-expect-error: serverActor missing "name" field
 	serverActor: { actorId: "__kio:server__" },
@@ -602,9 +601,9 @@ const _kioChannel = kio.channel
 		},
 	});
 
-const _kioAppEngine = kio.engine().channel(_kioChannel);
+const _kioAppEngine = kio.register(_kioChannel);
 
-// ── 28. defineApp ctx.actor carries full actor type ─────────────────
+// ── 28. engine-bound ctx.actor carries full actor type ──────────────
 
 kio.channel
 	.durable("typed-actor")
@@ -646,10 +645,10 @@ channel
 		apply() {},
 	});
 
-// ── 30. Engine.channel() is contravariant in actor type ──────────────
+// ── 30. Engine.register() is contravariant in actor type ────────────
 //
 // A channel whose handlers only read base actor fields (actorId) can be
-// added to any engine, regardless of what extra fields that engine's
+// registered on any engine, regardless of what extra fields that engine's
 // actor carries. Conversely, a channel that demands fields the engine's
 // actor doesn't have is rejected at compile time via ChannelActorMismatch.
 
@@ -657,12 +656,12 @@ import type { ChannelActorMismatch } from "@kio/shared";
 import { createChannelBuilder } from "@kio/shared";
 
 // Positive: bare-`channel.durable(...)` channel (TActor = BaseActor)
-// can be added to a defineApp engine with a richer actor type.
+// can be registered on an engine with a richer actor type.
 const _baseChannel = channel
 	.durable("library")
 	.shard("data", v.object({ value: v.string() }));
 
-const _kioEngineWithLib = kio.engine().channel(_baseChannel);
+const _kioEngineWithLib = kio.register(_baseChannel);
 
 // The result is an EngineBuilder, not a ChannelActorMismatch.
 type _30a = Expect<
@@ -674,11 +673,11 @@ type _30a = Expect<
 	>
 >;
 
-// Chaining further .channel() calls still works.
-_kioEngineWithLib.channel(_kioChannel);
+// Chaining further .register() calls still works.
+_kioEngineWithLib.register(_kioChannel);
 
 // Negative: a channel typed with an actor that has fields the engine's
-// actor doesn't have yields ChannelActorMismatch. Chaining .channel()
+// actor doesn't have yields ChannelActorMismatch. Chaining .register()
 // on that result is a type error.
 const _strictChannel = createChannelBuilder<
 	"durable",
@@ -687,7 +686,7 @@ const _strictChannel = createChannelBuilder<
 >("durable", "strict").shard("data", v.object({ value: v.string() }));
 
 // `engine()` defaults to TActor = BaseActor, which lacks `role`.
-const _mismatchResult = engine().channel(_strictChannel);
+const _mismatchResult = engine().register(_strictChannel);
 
 // The result IS a ChannelActorMismatch (not an EngineBuilder).
 type _30b = Expect<
@@ -699,24 +698,23 @@ type _30b = Expect<
 	>
 >;
 
-// Chaining .channel() on the mismatch fails — proof that the error
+// Chaining .register() on the mismatch fails — proof that the error
 // surfaces at the next call site.
-// @ts-expect-error: Property 'channel' does not exist on ChannelActorMismatch
-_mismatchResult.channel(_kioChannel);
+// @ts-expect-error: Property 'register' does not exist on ChannelActorMismatch
+_mismatchResult.register(_kioChannel);
 
 // ── 31. Built-in subscriptions channel composes with any engine ─────
 //
-// Because `engine.channel()` is contravariant (Section 30), the
+// Because `engine.register()` is contravariant (Section 30), the
 // subscriptions channel (typed with BaseActor) works with a bare
-// `engine()` AND with a `defineApp(...)` engine that has a richer actor.
-// Consumers never parameterize the factory — the default type just fits.
+// `engine()` AND with an engine configured with a richer actor.
 
 import { createSubscriptionsChannel } from "@kio/shared";
 
 const _subChannel = createSubscriptionsChannel({ kind: "ephemeral" });
 
-// Positive: add to a bare engine.
-const _bareEngineWithSubs = engine().channel(_subChannel);
+// Positive: register on a bare engine.
+const _bareEngineWithSubs = engine().register(_subChannel);
 type _31a = Expect<
 	Equal<
 		typeof _bareEngineWithSubs extends ChannelActorMismatch<unknown, unknown>
@@ -726,8 +724,8 @@ type _31a = Expect<
 	>
 >;
 
-// Positive: add to a defineApp engine with custom actor { actorId, name }.
-const _kioEngineWithSubs = kio.engine().channel(_subChannel);
+// Positive: register on an engine with custom actor { actorId, name }.
+const _kioEngineWithSubs = kio.register(_subChannel);
 type _31b = Expect<
 	Equal<
 		typeof _kioEngineWithSubs extends ChannelActorMismatch<unknown, unknown>
@@ -739,4 +737,4 @@ type _31b = Expect<
 
 // Positive: chaining another channel after subscriptions works (proves
 // the return is a real EngineBuilder, not an error type).
-_kioEngineWithSubs.channel(_kioChannel);
+_kioEngineWithSubs.register(_kioChannel);

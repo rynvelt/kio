@@ -29,7 +29,7 @@ export const counterChannel = channel
     },
   });
 
-export const appEngine = engine().channel(counterChannel);
+export const appEngine = engine().register(counterChannel);
 ```
 
 ```ts

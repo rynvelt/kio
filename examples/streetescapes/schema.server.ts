@@ -2,7 +2,7 @@ import { engine } from "@kio/shared";
 import { fogChannel, gameChannel, presenceChannel } from "./schema";
 
 export const serverEngine = engine()
-	.channel(
+	.register(
 		gameChannel
 			.serverImpl("visitLocation", {
 				validate(shards, input, _ctx, { reject }) {
@@ -74,5 +74,5 @@ export const serverEngine = engine()
 				},
 			}),
 	)
-	.channel(presenceChannel)
-	.channel(fogChannel);
+	.register(presenceChannel)
+	.register(fogChannel);

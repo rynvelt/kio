@@ -35,7 +35,7 @@ function setupClientEngine() {
 			},
 		});
 
-	return engine().channel(gameChannel).channel(presenceChannel);
+	return engine().register(gameChannel).register(presenceChannel);
 }
 
 describe("createClient", () => {

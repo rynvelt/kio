@@ -58,8 +58,8 @@ const presenceChannel = channel
 		},
 	});
 
-const serverEngine = engine().channel(gameChannel).channel(presenceChannel);
-const clientEngine = engine().channel(gameChannel).channel(presenceChannel);
+const serverEngine = engine().register(gameChannel).register(presenceChannel);
+const clientEngine = engine().register(gameChannel).register(presenceChannel);
 
 async function setupE2E() {
 	const adapter = new MemoryStateAdapter();

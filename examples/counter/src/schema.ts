@@ -62,5 +62,5 @@ export const presenceChannel = channel
 	});
 
 export const appEngine = engine()
-	.channel(counterChannel)
-	.channel(presenceChannel);
+	.register(counterChannel)
+	.register(presenceChannel);
