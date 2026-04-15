@@ -8,6 +8,26 @@ export interface ShardDefinition {
 	readonly name: string;
 	readonly kind: "singleton" | "perResource";
 	readonly schema: StandardSchemaV1;
+	/**
+	 * Fallback state used by the engine when a shard is loaded for the first
+	 * time (no persisted row / no in-memory entry).
+	 * - Singletons: a value (no resourceId applies).
+	 * - Per-resource: a value (shared default) or a function
+	 *   `(resourceId: string) => state` (per-instance default).
+	 * - Undefined: legacy behavior — starts as `undefined`, handlers must
+	 *   initialize the shape themselves.
+	 */
+	readonly defaultState?: unknown | ((resourceId: string) => unknown);
+}
+
+/** Options for singleton shard declarations */
+export interface ShardOptions<TState> {
+	readonly defaultState?: TState;
+}
+
+/** Options for per-resource shard declarations */
+export interface PerResourceShardOptions<TState> {
+	readonly defaultState?: TState | ((resourceId: string) => TState);
 }
 
 export interface OperationDefinition {
@@ -325,6 +345,7 @@ export interface ChannelBuilder<
 	shard<SName extends string, S extends StandardSchemaV1>(
 		name: SName,
 		schema: S,
+		options?: ShardOptions<InferSchema<S>>,
 	): ChannelBuilder<
 		Kind,
 		Name,
@@ -336,6 +357,7 @@ export interface ChannelBuilder<
 	shardPerResource<SName extends string, S extends StandardSchemaV1>(
 		name: SName,
 		schema: S,
+		options?: PerResourceShardOptions<InferSchema<S>>,
 	): ChannelBuilder<
 		Kind,
 		Name,
@@ -449,16 +471,30 @@ export function createChannelBuilder<
 		name,
 		"~data": data,
 
-		shard(shardName: string, schema: StandardSchemaV1) {
-			shardDefs.set(shardName, { name: shardName, kind: "singleton", schema });
+		shard(
+			shardName: string,
+			schema: StandardSchemaV1,
+			options?: ShardOptions<unknown>,
+		) {
+			shardDefs.set(shardName, {
+				name: shardName,
+				kind: "singleton",
+				schema,
+				defaultState: options?.defaultState,
+			});
 			return builder;
 		},
 
-		shardPerResource(shardName: string, schema: StandardSchemaV1) {
+		shardPerResource(
+			shardName: string,
+			schema: StandardSchemaV1,
+			options?: PerResourceShardOptions<unknown>,
+		) {
 			shardDefs.set(shardName, {
 				name: shardName,
 				kind: "perResource",
 				schema,
+				defaultState: options?.defaultState,
 			});
 			return builder;
 		},

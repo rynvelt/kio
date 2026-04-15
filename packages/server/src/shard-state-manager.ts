@@ -65,15 +65,41 @@ export class ShardStateManager {
 			}
 
 			const persisted = await this.adapter.load(this.channelId, ref.shardId);
-			const cached: CachedShard = persisted
-				? { state: persisted.state, version: persisted.version }
-				: { state: undefined, version: 0 };
+			let cached: CachedShard;
+			if (persisted) {
+				cached = { state: persisted.state, version: persisted.version };
+			} else {
+				const def = this.shardDefs.get(ref.shardType);
+				cached = {
+					state: def ? this.resolveDefaultState(def, ref.shardId) : undefined,
+					version: 0,
+				};
+			}
 
 			this.cache.set(ref.shardId, cached);
 			result.set(ref.shardId, cached);
 		}
 
 		return result;
+	}
+
+	/**
+	 * Resolve the initial state for a shard that has never been written.
+	 * For singletons: returns the static `defaultState` value.
+	 * For per-resource: invokes `defaultState(resourceId)` if it's a function,
+	 * otherwise returns the static value. Returns undefined when no default
+	 * is declared (legacy behavior).
+	 */
+	private resolveDefaultState(def: ShardDefinition, shardId: string): unknown {
+		if (def.defaultState === undefined) return undefined;
+		if (def.kind === "singleton") return def.defaultState;
+		if (typeof def.defaultState === "function") {
+			const resourceId = shardId.startsWith(`${def.name}:`)
+				? shardId.slice(def.name.length + 1)
+				: shardId;
+			return (def.defaultState as (id: string) => unknown)(resourceId);
+		}
+		return def.defaultState;
 	}
 
 	/** Build a composed root object from loaded shard states */

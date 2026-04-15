@@ -645,3 +645,61 @@ channel
 		},
 		apply() {},
 	});
+
+// ── 30. Engine.channel() is contravariant in actor type ──────────────
+//
+// A channel whose handlers only read base actor fields (actorId) can be
+// added to any engine, regardless of what extra fields that engine's
+// actor carries. Conversely, a channel that demands fields the engine's
+// actor doesn't have is rejected at compile time via ChannelActorMismatch.
+
+import type { ChannelActorMismatch } from "@kio/shared";
+import { createChannelBuilder } from "@kio/shared";
+
+// Positive: bare-`channel.durable(...)` channel (TActor = BaseActor)
+// can be added to a defineApp engine with a richer actor type.
+const _baseChannel = channel
+	.durable("library")
+	.shard("data", v.object({ value: v.string() }));
+
+const _kioEngineWithLib = kio.engine().channel(_baseChannel);
+
+// The result is an EngineBuilder, not a ChannelActorMismatch.
+type _30a = Expect<
+	Equal<
+		typeof _kioEngineWithLib extends ChannelActorMismatch<unknown, unknown>
+			? false
+			: true,
+		true
+	>
+>;
+
+// Chaining further .channel() calls still works.
+_kioEngineWithLib.channel(_kioChannel);
+
+// Negative: a channel typed with an actor that has fields the engine's
+// actor doesn't have yields ChannelActorMismatch. Chaining .channel()
+// on that result is a type error.
+const _strictChannel = createChannelBuilder<
+	"durable",
+	"strict",
+	{ actorId: string; role: "admin" }
+>("durable", "strict").shard("data", v.object({ value: v.string() }));
+
+// `engine()` defaults to TActor = BaseActor, which lacks `role`.
+const _mismatchResult = engine().channel(_strictChannel);
+
+// The result IS a ChannelActorMismatch (not an EngineBuilder).
+type _30b = Expect<
+	Equal<
+		typeof _mismatchResult extends ChannelActorMismatch<unknown, unknown>
+			? true
+			: false,
+		true
+	>
+>;
+
+// Chaining .channel() on the mismatch fails — proof that the error
+// surfaces at the next call site.
+// @ts-expect-error: Property 'channel' does not exist on ChannelActorMismatch
+_mismatchResult.channel(_kioChannel);

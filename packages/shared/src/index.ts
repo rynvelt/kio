@@ -12,11 +12,13 @@ export type {
 	OperationContext,
 	OperationDefinition,
 	OpMeta,
+	PerResourceShardOptions,
 	ScopedShardAccessors,
 	ServerImplDefinition,
 	ShardAccessors,
 	ShardDefinition,
 	ShardDefs,
+	ShardOptions,
 } from "./channel";
 export { channel, createChannelBuilder } from "./channel";
 export type { Codec } from "./codec";
@@ -26,6 +28,7 @@ export { defineApp } from "./define-app";
 export { createDirectTransport } from "./direct-transport";
 export type {
 	BaseActor,
+	ChannelActorMismatch,
 	EngineBuilder,
 	InferActor,
 	InferChannels,

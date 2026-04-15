@@ -3,12 +3,26 @@ import { type ShardDefinition, shard } from "@kio/shared";
 import { MemoryStateAdapter } from "./persistence";
 import { ShardStateManager } from "./shard-state-manager";
 
-function createManager(shardDefs: [string, "singleton" | "perResource"][]) {
+function createManager(
+	shardDefs: Array<
+		| [name: string, kind: "singleton" | "perResource"]
+		| [
+				name: string,
+				kind: "singleton" | "perResource",
+				defaultState: unknown | ((resourceId: string) => unknown),
+		  ]
+	>,
+) {
 	const defs = new Map<string, ShardDefinition>(
-		shardDefs.map(([name, kind]) => [
-			name,
-			// biome-ignore lint/suspicious/noExplicitAny: test helper
-			{ name, kind, schema: {} as any },
+		shardDefs.map((entry) => [
+			entry[0],
+			{
+				name: entry[0],
+				kind: entry[1],
+				// biome-ignore lint/suspicious/noExplicitAny: test helper
+				schema: {} as any,
+				defaultState: entry[2],
+			},
 		]),
 	);
 	const adapter = new MemoryStateAdapter();
@@ -46,6 +60,51 @@ describe("ShardStateManager", () => {
 
 			const loaded = await manager.loadShards([shard.ref("world")]);
 			expect(loaded.get("world")?.state).toEqual({ stage: "PLAYING" });
+		});
+
+		test("uses defaultState for missing singleton", async () => {
+			const { manager } = createManager([
+				["world", "singleton", { stage: "WAITING", turn: 0 }],
+			]);
+			const loaded = await manager.loadShards([shard.ref("world")]);
+			expect(loaded.get("world")?.state).toEqual({
+				stage: "WAITING",
+				turn: 0,
+			});
+			expect(loaded.get("world")?.version).toBe(0);
+		});
+
+		test("uses defaultState value for missing per-resource shard", async () => {
+			const { manager } = createManager([
+				["subscription", "perResource", { refs: [] }],
+			]);
+			const loaded = await manager.loadShards([
+				shard.ref("subscription", "bob"),
+			]);
+			expect(loaded.get("subscription:bob")?.state).toEqual({ refs: [] });
+		});
+
+		test("invokes defaultState function with resourceId for per-resource shards", async () => {
+			const init = (id: string) => ({ id, inventory: [] });
+			const { manager } = createManager([["seat", "perResource", init]]);
+			const loaded = await manager.loadShards([shard.ref("seat", "3")]);
+			expect(loaded.get("seat:3")?.state).toEqual({ id: "3", inventory: [] });
+		});
+
+		test("persisted state takes precedence over defaultState", async () => {
+			const { manager, adapter } = createManager([
+				["world", "singleton", { stage: "WAITING" }],
+			]);
+			await adapter.compareAndSwap("game", "world", 0, { stage: "PLAYING" });
+			const loaded = await manager.loadShards([shard.ref("world")]);
+			expect(loaded.get("world")?.state).toEqual({ stage: "PLAYING" });
+			expect(loaded.get("world")?.version).toBe(1);
+		});
+
+		test("no defaultState leaves state undefined (legacy behavior)", async () => {
+			const { manager } = createManager([["world", "singleton"]]);
+			const loaded = await manager.loadShards([shard.ref("world")]);
+			expect(loaded.get("world")?.state).toBeUndefined();
 		});
 	});
 

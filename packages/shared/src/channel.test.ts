@@ -115,6 +115,44 @@ describe("channel builder runtime data", () => {
 		expect(data.options.broadcastMode).toBe("patch");
 	});
 
+	test("stores defaultState on singleton shard", () => {
+		const ch = channel
+			.durable("game")
+			.shard("world", v.object({ stage: v.string() }), {
+				defaultState: { stage: "WAITING" },
+			});
+
+		const world = ch["~data"].shardDefs.get("world");
+		expect(world?.defaultState).toEqual({ stage: "WAITING" });
+	});
+
+	test("stores defaultState value on per-resource shard", () => {
+		const ch = channel
+			.ephemeral("subscriptions")
+			.shardPerResource(
+				"subscription",
+				v.object({ refs: v.array(v.string()) }),
+				{ defaultState: { refs: [] } },
+			);
+
+		const sub = ch["~data"].shardDefs.get("subscription");
+		expect(sub?.defaultState).toEqual({ refs: [] });
+	});
+
+	test("stores defaultState function on per-resource shard", () => {
+		const init = (id: string) => ({ id, value: 0 });
+		const ch = channel
+			.durable("counters")
+			.shardPerResource(
+				"counter",
+				v.object({ id: v.string(), value: v.number() }),
+				{ defaultState: init },
+			);
+
+		const counter = ch["~data"].shardDefs.get("counter");
+		expect(counter?.defaultState).toBe(init);
+	});
+
 	test("confirmed operation has no shared apply", () => {
 		const ch = channel
 			.durable("game")
