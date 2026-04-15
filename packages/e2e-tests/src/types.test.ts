@@ -738,3 +738,50 @@ type _31b = Expect<
 // Positive: chaining another channel after subscriptions works (proves
 // the return is a real EngineBuilder, not an error type).
 _kioEngineWithSubs.register(_kioChannel);
+
+// ── 32. engine({ subscriptions }) carries TSubs for type inference ──
+
+import type { InferSubscriptions, SubscriptionsConfig } from "@kio/shared";
+
+// Bare engine — TSubs is undefined.
+const _e32a = engine();
+type _32a = Expect<Equal<InferSubscriptions<typeof _e32a>, undefined>>;
+
+// With subscriptions — TSubs carries the kind literal.
+const _e32b = engine({ subscriptions: { kind: "ephemeral" } });
+type _32b = Expect<
+	Equal<InferSubscriptions<typeof _e32b>, { kind: "ephemeral" }>
+>;
+
+// Durable variant.
+const _e32c = engine({ subscriptions: { kind: "durable" } });
+type _32c = Expect<
+	Equal<InferSubscriptions<typeof _e32c>, { kind: "durable" }>
+>;
+
+// Combined with actor config — both carry through independently.
+const _e32d = engine({
+	actor: v.object({ actorId: v.string(), name: v.string() }),
+	serverActor: { actorId: "__kio:server__", name: "sys" },
+	subscriptions: { kind: "ephemeral" },
+});
+type _32d = Expect<
+	Equal<InferSubscriptions<typeof _e32d>, { kind: "ephemeral" }>
+>;
+type _32dActor = Expect<
+	Equal<InferActor<typeof _e32d>, { actorId: string; name: string }>
+>;
+
+// TSubs survives .register() chains.
+const _e32e = engine({ subscriptions: { kind: "ephemeral" } }).register(
+	channel.durable("game").shard("world", v.object({ turn: v.number() })),
+);
+type _32e = Expect<
+	Equal<InferSubscriptions<typeof _e32e>, { kind: "ephemeral" }>
+>;
+
+// @ts-expect-error: kind must be "durable" or "ephemeral"
+engine({ subscriptions: { kind: "something-else" } });
+
+// Narrow type on SubscriptionsConfig — future proofing.
+const _cfg: SubscriptionsConfig = { kind: "ephemeral" };

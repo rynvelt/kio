@@ -2,6 +2,9 @@ import * as v from "valibot";
 import { type ChannelBuilder, createChannelBuilder } from "./channel";
 import { shard } from "./shard";
 
+/** The fixed channel name used for the engine-managed subscriptions channel. */
+export const SUBSCRIPTIONS_CHANNEL_NAME = "subscriptions" as const;
+
 /**
  * One entry in an actor's subscription shard: permission to subscribe to
  * a single shard on a single channel.
@@ -95,7 +98,7 @@ export function createSubscriptionsChannel(
 	// rather than a union of two distinct builder instances. Method calls
 	// then resolve against one signature and the chain types normally.
 	// (See the SubscriptionsChannel TODO above for the deeper fix.)
-	return createChannelBuilder(options.kind, "subscriptions")
+	return createChannelBuilder(options.kind, SUBSCRIPTIONS_CHANNEL_NAME)
 		.shardPerResource("subscription", subscriptionShardStateSchema, {
 			// Materialize a fresh empty ref set the first time a given actor's
 			// shard is touched — grant/revoke apply can then treat `refs` as

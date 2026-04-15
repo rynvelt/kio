@@ -32,6 +32,8 @@ export type {
 	EngineOptions,
 	InferActor,
 	InferChannels,
+	InferSubscriptions,
+	SubscriptionsConfig,
 } from "./engine";
 export { engine } from "./engine";
 export type {
@@ -52,7 +54,10 @@ export type {
 	SubscriptionShardState,
 	SubscriptionsChannel,
 } from "./subscriptions";
-export { createSubscriptionsChannel } from "./subscriptions";
+export {
+	createSubscriptionsChannel,
+	SUBSCRIPTIONS_CHANNEL_NAME,
+} from "./subscriptions";
 export type {
 	AcknowledgeMessage,
 	BroadcastServerMessage,

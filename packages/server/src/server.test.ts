@@ -4,6 +4,7 @@ import {
 	channel,
 	engine,
 	type ServerMessage,
+	SUBSCRIPTIONS_CHANNEL_NAME,
 	type Subscriber,
 	shard,
 } from "@kio/shared";
@@ -682,6 +683,51 @@ describe("createServer", () => {
 			expect(errors).toHaveLength(1);
 			expect(errors[0]?.ctx.opId).toBe("op-1");
 			expect(errors[0]?.ctx.channelName).toBe("game");
+		});
+	});
+
+	describe("subscriptions config", () => {
+		// The subscriptions channel is hidden from the consumer's TChannels —
+		// the tests cast through `any` to introspect the internal runtime map.
+		// biome-ignore lint/suspicious/noExplicitAny: test-time introspection
+		type AnyServer = { getChannel(name: string): any };
+
+		test("engine without subscriptions config: built-in channel not registered", () => {
+			const appEngine = engine().register(
+				channel.durable("game").shard("world", v.object({ turn: v.number() })),
+			);
+			const server = createServer(appEngine, {
+				persistence: new MemoryStateAdapter(),
+			}) as unknown as AnyServer;
+
+			expect(server.getChannel("game")).toBeDefined();
+			expect(server.getChannel(SUBSCRIPTIONS_CHANNEL_NAME)).toBeUndefined();
+		});
+
+		test("engine with ephemeral subscriptions: built-in channel is registered", () => {
+			const appEngine = engine({
+				subscriptions: { kind: "ephemeral" },
+			}).register(
+				channel.durable("game").shard("world", v.object({ turn: v.number() })),
+			);
+			const server = createServer(appEngine, {
+				persistence: new MemoryStateAdapter(),
+			}) as unknown as AnyServer;
+
+			expect(server.getChannel("game")).toBeDefined();
+			const subsRuntime = server.getChannel(SUBSCRIPTIONS_CHANNEL_NAME);
+			expect(subsRuntime).toBeDefined();
+			expect(subsRuntime?.kind).toBe("ephemeral");
+		});
+
+		test("engine with durable subscriptions: built-in channel is durable", () => {
+			const appEngine = engine({ subscriptions: { kind: "durable" } });
+			const server = createServer(appEngine, {
+				persistence: new MemoryStateAdapter(),
+			}) as unknown as AnyServer;
+			expect(server.getChannel(SUBSCRIPTIONS_CHANNEL_NAME)?.kind).toBe(
+				"durable",
+			);
 		});
 	});
 });

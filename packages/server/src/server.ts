@@ -5,8 +5,13 @@ import type {
 	EngineBuilder,
 	ServerTransport,
 	Subscriber,
+	SubscriptionsConfig,
 } from "@kio/shared";
-import { jsonCodec, KIO_SERVER_ACTOR } from "@kio/shared";
+import {
+	createSubscriptionsChannel,
+	jsonCodec,
+	KIO_SERVER_ACTOR,
+} from "@kio/shared";
 import { ActorRegistry } from "./actor-registry";
 import { AfterCommitHooks } from "./after-commit-hooks";
 import { ChannelRuntime } from "./channel-runtime";
@@ -171,8 +176,9 @@ export type AfterCommitHandler<
 export function createServer<
 	TChannels extends object,
 	TActor extends BaseActor = BaseActor,
+	TSubs extends SubscriptionsConfig | undefined = undefined,
 >(
-	engineBuilder: EngineBuilder<TChannels, TActor>,
+	engineBuilder: EngineBuilder<TChannels, TActor, TSubs>,
 	config: ServerConfig<TActor>,
 ): Server<TChannels> {
 	const channels = new Map<string, ChannelRuntime>();
@@ -187,6 +193,21 @@ export function createServer<
 		channels.set(
 			name,
 			new ChannelRuntime(channelData, config.persistence, {
+				authorize: config.authorize,
+				serverActorId: serverActor.actorId,
+			}),
+		);
+	}
+
+	// Internally register the subscriptions channel if the engine opted in.
+	// The consumer never sees "subscriptions" in TChannels — it's engine
+	// machinery, exposed through dedicated helpers (Phase 3c).
+	const subsConfig = engineBuilder["~subscriptions"];
+	if (subsConfig) {
+		const subsChannel = createSubscriptionsChannel({ kind: subsConfig.kind });
+		channels.set(
+			subsChannel["~data"].name,
+			new ChannelRuntime(subsChannel["~data"], config.persistence, {
 				authorize: config.authorize,
 				serverActorId: serverActor.actorId,
 			}),

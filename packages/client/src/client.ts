@@ -1,4 +1,5 @@
 import type {
+	BaseActor,
 	ChannelBuilder,
 	ClientMessage,
 	ClientTransport,
@@ -7,8 +8,9 @@ import type {
 	ServerMessage,
 	ShardState,
 	SubmitResult,
+	SubscriptionsConfig,
 } from "@kio/shared";
-import { jsonCodec } from "@kio/shared";
+import { createSubscriptionsChannel, jsonCodec } from "@kio/shared";
 import { ClientChannelEngine } from "./client-channel-engine";
 
 /** Configuration for createClient */
@@ -61,8 +63,12 @@ export interface Client<TChannels extends object = object> {
 export type UntypedClient = Client<Record<string, never>>;
 
 /** Create a client from an engine builder and config */
-export function createClient<TChannels extends object>(
-	engineBuilder: EngineBuilder<TChannels>,
+export function createClient<
+	TChannels extends object,
+	TActor extends BaseActor = BaseActor,
+	TSubs extends SubscriptionsConfig | undefined = undefined,
+>(
+	engineBuilder: EngineBuilder<TChannels, TActor, TSubs>,
 	config: ClientConfig,
 ): Client<TChannels> {
 	const engines = new Map<string, ClientChannelEngine>();
@@ -80,6 +86,18 @@ export function createClient<TChannels extends object>(
 		engines.set(
 			name,
 			new ClientChannelEngine(channelData, sendMessage, timeoutMs),
+		);
+	}
+
+	// Internally register the subscriptions channel if the engine opted in.
+	// Mirrors createServer — both sides agree on kind because they share the
+	// same engine config imported from the consumer's schema file.
+	const subsConfig = engineBuilder["~subscriptions"];
+	if (subsConfig) {
+		const subsChannel = createSubscriptionsChannel({ kind: subsConfig.kind });
+		engines.set(
+			subsChannel["~data"].name,
+			new ClientChannelEngine(subsChannel["~data"], sendMessage, timeoutMs),
 		);
 	}
 

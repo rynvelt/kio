@@ -15,6 +15,17 @@ export interface BaseActor {
 }
 
 /**
+ * Configuration for the engine-managed subscriptions feature. Set this on
+ * `engine()` to opt in; `createServer` and `createClient` will then
+ * internally register the subscription channel. The client and server must
+ * use the same engine (imported from a shared schema file) so `kind`
+ * cannot diverge.
+ */
+export interface SubscriptionsConfig {
+	readonly kind: "durable" | "ephemeral";
+}
+
+/**
  * Surfaced as the return type of `.register()` when the engine's actor type
  * cannot satisfy the channel's required actor shape. Chaining another method
  * on this type fails with a visible error message in the type hover.
@@ -52,16 +63,18 @@ export interface ChannelFactory<TActor extends BaseActor> {
  * Create channels with `.channel.durable(name)` / `.channel.ephemeral(name)`
  * (pre-typed with the engine's actor), build ref objects with `.shard.ref()`,
  * and add finished channels with `.register(ch)`. `createServer` and
- * `createClient` take the builder and introspect `~channels` / `~actorSchema`
- * / `~serverActor` to set themselves up.
+ * `createClient` take the builder and introspect `~channels`, `~actorSchema`,
+ * `~serverActor`, and `~subscriptions` to set themselves up.
  */
 export interface EngineBuilder<
 	TChannels extends object = object,
 	TActor extends BaseActor = BaseActor,
+	TSubs extends SubscriptionsConfig | undefined = undefined,
 > {
 	readonly "~channels": ReadonlyMap<string, ChannelData>;
 	readonly "~actorSchema": StandardSchemaV1 | undefined;
 	readonly "~serverActor": TActor | undefined;
+	readonly "~subscriptions": TSubs;
 
 	/** Channel builder factory, pre-typed with TActor. */
 	readonly channel: ChannelFactory<TActor>;
@@ -87,18 +100,29 @@ export interface EngineBuilder<
 	): TActor extends ChTActor
 		? EngineBuilder<
 				TChannels & Record<Name, ChannelBuilder<Kind, Name, D, Ops, ChTActor>>,
-				TActor
+				TActor,
+				TSubs
 			>
 		: ChannelActorMismatch<ChTActor, TActor>;
 }
 
 /** Extract the TChannels type from an EngineBuilder */
 export type InferChannels<E> =
-	E extends EngineBuilder<infer TChannels, infer _TActor> ? TChannels : never;
+	E extends EngineBuilder<infer TChannels, infer _TActor, infer _TSubs>
+		? TChannels
+		: never;
 
 /** Extract the TActor type from an EngineBuilder */
 export type InferActor<E> =
-	E extends EngineBuilder<infer _TChannels, infer TActor> ? TActor : never;
+	E extends EngineBuilder<infer _TChannels, infer TActor, infer _TSubs>
+		? TActor
+		: never;
+
+/** Extract the subscriptions config (or undefined) from an EngineBuilder */
+export type InferSubscriptions<E> =
+	E extends EngineBuilder<infer _TChannels, infer _TActor, infer TSubs>
+		? TSubs
+		: never;
 
 // biome-ignore lint/complexity/noBannedTypes: empty object for type accumulation
 type EmptyChannels = {};
@@ -106,6 +130,7 @@ type EmptyChannels = {};
 /** Configuration for {@link engine}. All fields optional. */
 export interface EngineOptions<
 	TSchema extends StandardSchemaV1 | undefined = undefined,
+	TSubs extends SubscriptionsConfig | undefined = undefined,
 > {
 	/**
 	 * Schema for validating actor identity on every connection. When set,
@@ -121,6 +146,13 @@ export interface EngineOptions<
 	readonly serverActor?: TSchema extends StandardSchemaV1
 		? InferSchema<TSchema> & BaseActor
 		: BaseActor;
+	/**
+	 * Opt into the engine-managed subscriptions feature. When set,
+	 * `createServer` / `createClient` internally register the subscription
+	 * channel using this `kind`. Must be declared on an engine that's
+	 * shared between server and client (so both sides agree).
+	 */
+	readonly subscriptions?: TSubs;
 }
 
 type ResolveActor<TSchema> = TSchema extends StandardSchemaV1
@@ -147,13 +179,28 @@ type ResolveActor<TSchema> = TSchema extends StandardSchemaV1
  * const appEngine = app.register(gameChannel)
  * ```
  */
-export function engine(): EngineBuilder<EmptyChannels, BaseActor>;
+export function engine(): EngineBuilder<EmptyChannels, BaseActor, undefined>;
+export function engine<TSubs extends SubscriptionsConfig>(
+	options: EngineOptions<undefined, TSubs> & { subscriptions: TSubs },
+): EngineBuilder<EmptyChannels, BaseActor, TSubs>;
 export function engine<TSchema extends StandardSchemaV1>(
-	options: EngineOptions<TSchema> & { actor: TSchema },
-): EngineBuilder<EmptyChannels, ResolveActor<TSchema>>;
+	options: EngineOptions<TSchema, undefined> & { actor: TSchema },
+): EngineBuilder<EmptyChannels, ResolveActor<TSchema>, undefined>;
+export function engine<
+	TSchema extends StandardSchemaV1,
+	TSubs extends SubscriptionsConfig,
+>(
+	options: EngineOptions<TSchema, TSubs> & {
+		actor: TSchema;
+		subscriptions: TSubs;
+	},
+): EngineBuilder<EmptyChannels, ResolveActor<TSchema>, TSubs>;
 export function engine(
-	options?: EngineOptions<StandardSchemaV1 | undefined>,
-): EngineBuilder<EmptyChannels, BaseActor> {
+	options?: EngineOptions<
+		StandardSchemaV1 | undefined,
+		SubscriptionsConfig | undefined
+	>,
+): EngineBuilder<EmptyChannels, BaseActor, undefined> {
 	const channels = new Map<string, ChannelData>();
 
 	const factory: ChannelFactory<BaseActor> = {
@@ -169,6 +216,7 @@ export function engine(
 		"~channels": channels,
 		"~actorSchema": options?.actor,
 		"~serverActor": options?.serverActor,
+		"~subscriptions": options?.subscriptions,
 		channel: factory,
 		shard,
 		register(ch: { "~data": ChannelData }) {
