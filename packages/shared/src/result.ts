@@ -7,6 +7,7 @@ export type EngineErrorCode =
 	| "INVALID_INPUT"
 	| "INVALID_OPERATION"
 	| "INVALID_CHANNEL"
+	| "SERVER_ONLY_OPERATION"
 	| "INTERNAL_ERROR";
 
 /** Client-only block code — no server round-trip happened */

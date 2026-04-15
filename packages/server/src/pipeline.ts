@@ -122,6 +122,20 @@ export class OperationPipeline {
 			};
 		}
 
+		// 0. Server-only gate — reject non-server submissions before any other work
+		if (opDef.serverOnly) {
+			const isServerActor =
+				this.config.serverActorId !== undefined &&
+				actor.actorId === this.config.serverActorId;
+			if (!isServerActor) {
+				return {
+					status: "rejected",
+					code: "SERVER_ONLY_OPERATION",
+					message: `Operation "${operationName}" can only be submitted by the server`,
+				};
+			}
+		}
+
 		// 1. Deduplication
 		if (opDef.deduplicate) {
 			if (this.config.deduplication?.has(opId)) {

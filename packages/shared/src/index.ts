@@ -38,10 +38,18 @@ export type {
 	SubmitResult,
 } from "./result";
 export type { InferSchema } from "./schema";
+export { KIO_SERVER_ACTOR, KIO_SERVER_ACTOR_ID } from "./server-actor";
 export type { ShardRef } from "./shard";
 export { shard } from "./shard";
 export { buildShardAccessors } from "./shard-accessors";
 export type { PendingOperation, ShardState } from "./state";
+export type {
+	CreateSubscriptionsChannelOptions,
+	SubscriptionShardEntry,
+	SubscriptionShardState,
+	SubscriptionsChannel,
+} from "./subscriptions";
+export { createSubscriptionsChannel } from "./subscriptions";
 export type {
 	AcknowledgeMessage,
 	BroadcastServerMessage,

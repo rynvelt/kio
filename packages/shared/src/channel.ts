@@ -15,6 +15,8 @@ export interface OperationDefinition {
 	readonly execution: "optimistic" | "confirmed" | "computed";
 	readonly versionChecked?: boolean;
 	readonly deduplicate?: boolean;
+	/** If true, pipeline rejects non-server-actor submissions before any other work. */
+	readonly serverOnly?: boolean;
 	readonly inputSchema: StandardSchemaV1;
 	readonly errorsSchema: StandardSchemaV1 | undefined;
 	readonly serverResultSchema: StandardSchemaV1 | undefined;
@@ -134,6 +136,7 @@ interface OptimisticOperationConfig<
 	readonly execution: "optimistic";
 	readonly versionChecked?: boolean;
 	readonly deduplicate?: boolean;
+	readonly serverOnly?: boolean;
 	readonly input: StandardSchemaV1<TInput>;
 	readonly scope: (
 		input: TInput,
@@ -155,6 +158,7 @@ interface ConfirmedOperationConfig<
 	readonly execution: "confirmed";
 	readonly versionChecked?: boolean;
 	readonly deduplicate?: boolean;
+	readonly serverOnly?: boolean;
 	readonly input: StandardSchemaV1<TInput>;
 	readonly scope: (
 		input: TInput,
@@ -170,6 +174,7 @@ interface ComputedOperationConfig<
 	readonly execution: "computed";
 	readonly versionChecked?: boolean;
 	readonly deduplicate?: boolean;
+	readonly serverOnly?: boolean;
 	readonly input: StandardSchemaV1<TInput>;
 	readonly scope: (
 		input: TInput,
@@ -465,6 +470,7 @@ export function createChannelBuilder<
 				execution: config.execution,
 				versionChecked: config.versionChecked ?? true,
 				deduplicate: config.deduplicate ?? true,
+				serverOnly: config.serverOnly ?? false,
 				inputSchema: config.input,
 				errorsSchema: config.errors ?? undefined,
 				serverResultSchema: config.serverResult ?? undefined,

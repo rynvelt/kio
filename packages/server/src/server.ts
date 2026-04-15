@@ -6,7 +6,7 @@ import type {
 	ServerTransport,
 	Subscriber,
 } from "@kio/shared";
-import { jsonCodec } from "@kio/shared";
+import { jsonCodec, KIO_SERVER_ACTOR } from "@kio/shared";
 import { ActorRegistry } from "./actor-registry";
 import { AfterCommitHooks } from "./after-commit-hooks";
 import { ChannelRuntime } from "./channel-runtime";
@@ -177,9 +177,8 @@ export function createServer<
 ): Server<TChannels> {
 	const channels = new Map<string, ChannelRuntime>();
 	const { transport } = config;
-	const serverActor: BaseActor = engineBuilder["~serverActor"] ?? {
-		actorId: "__kio:server__",
-	};
+	const serverActor: BaseActor =
+		engineBuilder["~serverActor"] ?? KIO_SERVER_ACTOR;
 	const onAfterCommitError: OnAfterCommitError =
 		config.onAfterCommitError ?? defaultOnAfterCommitError;
 

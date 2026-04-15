@@ -672,4 +672,120 @@ describe("OperationPipeline", () => {
 			}
 		});
 	});
+
+	describe("serverOnly operations", () => {
+		function setupServerOnly() {
+			const ch = channel
+				.durable("admin")
+				.shard("world", v.object({ counter: v.number() }))
+				.operation("tick", {
+					execution: "confirmed",
+					serverOnly: true,
+					input: v.object({}),
+					scope: () => [shard.ref("world")],
+				})
+				.serverImpl("tick", {
+					apply(shards) {
+						(shards.world as { counter: number }).counter += 1;
+					},
+				});
+
+			const data = ch["~data"];
+			const adapter = new MemoryStateAdapter();
+			const stateManager = new ShardStateManager(
+				"admin",
+				data.shardDefs,
+				adapter,
+			);
+			return { data, adapter, stateManager };
+		}
+
+		test("rejects non-server actor with SERVER_ONLY_OPERATION", async () => {
+			const { data, adapter, stateManager } = setupServerOnly();
+			await adapter.compareAndSwap("admin", "world", 0, { counter: 0 });
+
+			const pipeline = new OperationPipeline(data, stateManager, {
+				serverActorId: "__kio:server__",
+			});
+			const result = await pipeline.submit({
+				operationName: "tick",
+				input: {},
+				actor: { actorId: "player:alice" },
+				opId: nextOpId(),
+			});
+
+			expect(result.status).toBe("rejected");
+			if (result.status === "rejected") {
+				expect(result.code).toBe("SERVER_ONLY_OPERATION");
+			}
+
+			// Apply was not run — counter unchanged
+			const persisted = await adapter.load("admin", "world");
+			expect((persisted?.state as { counter: number }).counter).toBe(0);
+		});
+
+		test("accepts server-as-actor submission", async () => {
+			const { data, adapter, stateManager } = setupServerOnly();
+			await adapter.compareAndSwap("admin", "world", 0, { counter: 0 });
+
+			const pipeline = new OperationPipeline(data, stateManager, {
+				serverActorId: "__kio:server__",
+			});
+			const result = await pipeline.submit({
+				operationName: "tick",
+				input: {},
+				actor: { actorId: "__kio:server__" },
+				opId: nextOpId(),
+			});
+
+			expect(result.status).toBe("acknowledged");
+
+			const persisted = await adapter.load("admin", "world");
+			expect((persisted?.state as { counter: number }).counter).toBe(1);
+		});
+
+		test("rejects non-server actor even when serverActorId is unset", async () => {
+			// Defensive: if serverActorId is unconfigured, serverOnly ops are
+			// unreachable — nobody counts as the server actor, so everything is
+			// rejected. This is the safe default.
+			const { data, adapter, stateManager } = setupServerOnly();
+			await adapter.compareAndSwap("admin", "world", 0, { counter: 0 });
+
+			const pipeline = new OperationPipeline(data, stateManager);
+			const result = await pipeline.submit({
+				operationName: "tick",
+				input: {},
+				actor: { actorId: "__kio:server__" },
+				opId: nextOpId(),
+			});
+
+			expect(result.status).toBe("rejected");
+			if (result.status === "rejected") {
+				expect(result.code).toBe("SERVER_ONLY_OPERATION");
+			}
+		});
+
+		test("skips authorize for server-as-actor (existing behavior preserved)", async () => {
+			const { data, adapter, stateManager } = setupServerOnly();
+			await adapter.compareAndSwap("admin", "world", 0, { counter: 0 });
+
+			let authorizeCalled = false;
+			const pipeline = new OperationPipeline(data, stateManager, {
+				serverActorId: "__kio:server__",
+				authorize: () => {
+					authorizeCalled = true;
+					return false;
+				},
+			});
+			const result = await pipeline.submit({
+				operationName: "tick",
+				input: {},
+				actor: { actorId: "__kio:server__" },
+				opId: nextOpId(),
+			});
+
+			expect(result.status).toBe("acknowledged");
+			expect(authorizeCalled).toBe(false);
+		});
+	});
 });
