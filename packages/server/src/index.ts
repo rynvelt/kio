@@ -15,9 +15,11 @@ export type {
 	AfterCommitContext,
 	AfterCommitErrorContext,
 	AfterCommitHandler,
+	ConditionalSubscriptionMethods,
 	OnAfterCommitError,
 	Server,
 	ServerConfig,
+	SubscriptionMethods,
 	SubscriptionRef,
 } from "./server";
 export { createServer } from "./server";

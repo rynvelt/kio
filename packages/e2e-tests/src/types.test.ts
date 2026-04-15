@@ -785,3 +785,40 @@ engine({ subscriptions: { kind: "something-else" } });
 
 // Narrow type on SubscriptionsConfig — future proofing.
 const _cfg: SubscriptionsConfig = { kind: "ephemeral" };
+
+// ── 33. Server.grantSubscription / revokeSubscription are conditional ──
+//
+// Wrapped in a never-called function: the checks are purely compile-time,
+// but the runtime calls would throw if executed (in the negative case the
+// engine has no subscriptions channel registered).
+
+function _serverSubscriptionHelperTypes() {
+	// Positive: engine with subscriptions config → Server has the helpers.
+	const serverWithSubs = createServer(
+		engine({ subscriptions: { kind: "ephemeral" } }),
+		{ persistence: new MemoryStateAdapter() },
+	);
+	serverWithSubs.grantSubscription("bob", {
+		channelId: "game",
+		shardId: "world",
+	});
+	serverWithSubs.revokeSubscription("bob", {
+		channelId: "game",
+		shardId: "world",
+	});
+
+	// Negative: engine without subscriptions config → methods don't exist.
+	const serverNoSubs = createServer(engine(), {
+		persistence: new MemoryStateAdapter(),
+	});
+	// @ts-expect-error: grantSubscription does not exist when subscriptions are off
+	serverNoSubs.grantSubscription("bob", {
+		channelId: "game",
+		shardId: "world",
+	});
+	// @ts-expect-error: revokeSubscription does not exist when subscriptions are off
+	serverNoSubs.revokeSubscription("bob", {
+		channelId: "game",
+		shardId: "world",
+	});
+}

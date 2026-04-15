@@ -5,12 +5,14 @@ import type {
 	EngineBuilder,
 	ServerTransport,
 	Subscriber,
+	SubscriptionShardEntry,
 	SubscriptionsConfig,
 } from "@kio/shared";
 import {
 	createSubscriptionsChannel,
 	jsonCodec,
 	KIO_SERVER_ACTOR,
+	SUBSCRIPTIONS_CHANNEL_NAME,
 } from "@kio/shared";
 import { ActorRegistry } from "./actor-registry";
 import { AfterCommitHooks } from "./after-commit-hooks";
@@ -80,6 +82,47 @@ type OperationInput<Ch, OpName extends string> =
 				: never
 			: never
 		: never;
+
+/**
+ * Methods available on the Server only when the engine has opted in to
+ * the subscriptions feature via `engine({ subscriptions: { kind } })`.
+ * Thin wrappers over `server.submit("subscriptions", ...)` so consumers
+ * never see the channel name, operation name, or shard wire format.
+ */
+export interface SubscriptionMethods {
+	/**
+	 * Grant an actor permission to subscribe to a shard. Idempotent —
+	 * granting the same ref twice is a no-op (doesn't rev the shard's
+	 * version). Submitted as server-as-actor; the pipeline's
+	 * `SERVER_ONLY_OPERATION` gate prevents clients from calling the
+	 * underlying `grant` operation directly.
+	 */
+	grantSubscription(
+		actorId: string,
+		ref: SubscriptionShardEntry,
+	): Promise<PipelineResult>;
+
+	/**
+	 * Revoke an actor's permission to subscribe to a shard. No-op if the
+	 * ref isn't present. Submitted as server-as-actor.
+	 */
+	revokeSubscription(
+		actorId: string,
+		ref: SubscriptionShardEntry,
+	): Promise<PipelineResult>;
+}
+
+// biome-ignore lint/complexity/noBannedTypes: empty object for conditional intersection
+type EmptyMethods = {};
+
+/**
+ * Conditional addendum to {@link Server}: includes {@link SubscriptionMethods}
+ * only when the engine's `TSubs` is a concrete config, otherwise nothing.
+ * Calling `grantSubscription` on a server whose engine didn't opt in is a
+ * compile-time error.
+ */
+export type ConditionalSubscriptionMethods<TSubs> =
+	TSubs extends SubscriptionsConfig ? SubscriptionMethods : EmptyMethods;
 
 /** Typed server instance — channel names, operation names, and inputs are enforced */
 export interface Server<TChannels extends object = object> {
@@ -180,7 +223,7 @@ export function createServer<
 >(
 	engineBuilder: EngineBuilder<TChannels, TActor, TSubs>,
 	config: ServerConfig<TActor>,
-): Server<TChannels> {
+): Server<TChannels> & ConditionalSubscriptionMethods<TSubs> {
 	const channels = new Map<string, ChannelRuntime>();
 	const { transport } = config;
 	const serverActor: BaseActor =
@@ -364,5 +407,35 @@ export function createServer<
 				handler as AfterCommitHandler<unknown, TChannels>,
 			);
 		},
-	} as Server<TChannels>;
+
+		// ── Subscription helpers ────────────────────────────────────────
+		//
+		// These are always attached at runtime; the conditional return type
+		// hides them when the engine hasn't opted into subscriptions, so
+		// calling them in that case is a compile error. If a consumer
+		// bypasses the type system (cast), the underlying submit will throw
+		// "Channel 'subscriptions' is not registered" — acceptable
+		// fail-loud behavior.
+		grantSubscription(actorId: string, ref: SubscriptionShardEntry) {
+			return internalSubmit(
+				SUBSCRIPTIONS_CHANNEL_NAME,
+				"grant",
+				{ actorId, ref },
+				serverActor,
+				`server:${String(serverOpCounter++)}`,
+				0,
+			);
+		},
+
+		revokeSubscription(actorId: string, ref: SubscriptionShardEntry) {
+			return internalSubmit(
+				SUBSCRIPTIONS_CHANNEL_NAME,
+				"revoke",
+				{ actorId, ref },
+				serverActor,
+				`server:${String(serverOpCounter++)}`,
+				0,
+			);
+		},
+	} as Server<TChannels> & ConditionalSubscriptionMethods<TSubs>;
 }

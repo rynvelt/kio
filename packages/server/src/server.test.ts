@@ -692,6 +692,24 @@ describe("createServer", () => {
 		// biome-ignore lint/suspicious/noExplicitAny: test-time introspection
 		type AnyServer = { getChannel(name: string): any };
 
+		async function readSubscriptionShard(
+			anyServer: AnyServer,
+			actorId: string,
+		) {
+			const subsRuntime = anyServer.getChannel(SUBSCRIPTIONS_CHANNEL_NAME);
+			const loaded = (await subsRuntime?.loadShardStates?.([
+				`subscription:${actorId}`,
+			])) as
+				| Map<
+						string,
+						{
+							state: { refs: Array<{ channelId: string; shardId: string }> };
+						}
+				  >
+				| undefined;
+			return loaded?.get(`subscription:${actorId}`)?.state;
+		}
+
 		test("engine without subscriptions config: built-in channel not registered", () => {
 			const appEngine = engine().register(
 				channel.durable("game").shard("world", v.object({ turn: v.number() })),
@@ -728,6 +746,61 @@ describe("createServer", () => {
 			expect(server.getChannel(SUBSCRIPTIONS_CHANNEL_NAME)?.kind).toBe(
 				"durable",
 			);
+		});
+
+		test("grantSubscription adds the ref to the actor's subscription shard", async () => {
+			const appEngine = engine({ subscriptions: { kind: "ephemeral" } });
+			const server = createServer(appEngine, {
+				persistence: new MemoryStateAdapter(),
+			});
+
+			const result = await server.grantSubscription("bob", {
+				channelId: "game",
+				shardId: "world",
+			});
+			expect(result.status).toBe("acknowledged");
+
+			const state = await readSubscriptionShard(
+				server as unknown as AnyServer,
+				"bob",
+			);
+			expect(state?.refs).toEqual([{ channelId: "game", shardId: "world" }]);
+		});
+
+		test("grantSubscription is idempotent", async () => {
+			const appEngine = engine({ subscriptions: { kind: "ephemeral" } });
+			const server = createServer(appEngine, {
+				persistence: new MemoryStateAdapter(),
+			});
+			const ref = { channelId: "game", shardId: "world" };
+
+			await server.grantSubscription("bob", ref);
+			await server.grantSubscription("bob", ref);
+
+			const state = await readSubscriptionShard(
+				server as unknown as AnyServer,
+				"bob",
+			);
+			expect(state?.refs).toHaveLength(1);
+		});
+
+		test("revokeSubscription removes an existing ref", async () => {
+			const appEngine = engine({ subscriptions: { kind: "ephemeral" } });
+			const server = createServer(appEngine, {
+				persistence: new MemoryStateAdapter(),
+			});
+			const refA = { channelId: "game", shardId: "world" };
+			const refB = { channelId: "presence", shardId: "player:alice" };
+
+			await server.grantSubscription("bob", refA);
+			await server.grantSubscription("bob", refB);
+			await server.revokeSubscription("bob", refA);
+
+			const state = await readSubscriptionShard(
+				server as unknown as AnyServer,
+				"bob",
+			);
+			expect(state?.refs).toEqual([refB]);
 		});
 	});
 });
