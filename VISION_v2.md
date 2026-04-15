@@ -75,7 +75,7 @@ Ephemeral channels differ from durable channels in several important ways:
 | Out-of-order protection | Yes (version comparison) | No — brief staleness possible |
 | Shard creation | Explicit (via persistence) | On first write |
 
-**State loss on server restart:** All ephemeral state is lost. This is by design. On restart, clients reconnect, the consumer's `onConnect` hook fires (rebuilding server-driven state like online/offline), and the engine automatically resubmits each client's last known value for ephemeral shards they had local state for (rebuilding client-driven state like GPS location). The consumer doesn't need to handle this explicitly.
+**State loss on server restart:** All ephemeral state is lost. This is by design — ephemeral means disposable. On restart, clients reconnect and the consumer's `onConnect` hook fires, which is where server-driven state (online/offline, server-set flags) is rebuilt. Client-driven ephemeral state (GPS, cursor position) is expected to refresh itself naturally: such writes are typically continuous (a GPS watcher firing every few seconds), so the gap after reconnect closes within one update cycle. Consumers who need faster recovery can record the last value in app state and resubmit in their transport's `onConnected` handler — the engine does not do this automatically.
 
 **No version, no ordering:** Ephemeral broadcasts carry no version number — the client always accepts the latest value it receives. If two broadcasts arrive out of order (network reordering), the client may briefly show a stale update. This is acceptable for presence-style data where the next update corrects it within seconds. If a consumer needs ordering for a specific ephemeral use case, they can include a timestamp in their state schema and filter client-side.
 
@@ -661,10 +661,7 @@ Recovery uses the same mechanism as initial connection — not a special protoco
 
 **Durable channels:** Server compares versions per shard. Only sends state where the server's version is higher than what the client reported. For a brief disconnect where nothing changed, zero data is transferred.
 
-**Ephemeral channels:** Two mechanisms rebuild state on reconnect:
-
-1. **Server-driven state** (e.g., online/offline presence): the consumer's `onConnect` hook fires and submits operations as usual — the same code that runs on first connect.
-2. **Client-driven state** (e.g., GPS location): the engine automatically resubmits the client's last known value for each ephemeral shard it had local state for. No consumer code needed.
+**Ephemeral channels:** The engine does not resend any ephemeral state on reconnect — the channel's contract is "disposable, latest-wins." Server-driven ephemeral state is rebuilt by the consumer's `onConnect` hook firing on every connect (same code path as first connect). Client-driven ephemeral state is expected to refresh itself naturally from whatever source drives it (e.g., a GPS watcher's next tick); consumers who need immediate re-emission can do so in their own reconnect handler.
 
 ### Error Model
 
@@ -1101,7 +1098,7 @@ subscriptionsOnConnect(actor, conn, channelName) {
 2. Engine cleans up shard subscriptions
 3. Engine calls consumer's `onDisconnect(actor, reason)` hook
 
-**Ephemeral channels on reconnect:** Server-driven ephemeral state (e.g., online/offline) is rebuilt by the `onConnect` hook. Client-driven ephemeral state (e.g., GPS location) is auto-resubmitted by the engine from the client's last known values.
+**Ephemeral channels on reconnect:** Server-driven ephemeral state (e.g., online/offline) is rebuilt by the `onConnect` hook. Client-driven ephemeral state (e.g., GPS location) is not auto-rebuilt — it refreshes naturally from its source or via a consumer-implemented reconnect handler.
 
 ### Liveness and Presence
 
