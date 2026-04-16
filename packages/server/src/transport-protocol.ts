@@ -248,8 +248,10 @@ export class TransportProtocol<TActor extends BaseActor> {
 			}> = [];
 
 			for (const [shardId, { state, version }] of shardStates) {
-				const clientVersion = clientVersions[shardId] ?? 0;
-				if (version > clientVersion) {
+				const clientVersion = clientVersions[shardId];
+				// Send if the client has no version for this shard (first connect)
+				// or if the server's version is newer (reconnect with stale data).
+				if (clientVersion === undefined || version > clientVersion) {
 					entries.push({ shardId, version, state });
 				}
 			}
