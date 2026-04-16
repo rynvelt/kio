@@ -20,6 +20,7 @@ import { ChannelRuntime } from "./channel-runtime";
 import type { StateAdapter } from "./persistence";
 import type { AuthorizeFn, PipelineResult } from "./pipeline";
 import { SubscriptionResolver } from "./subscription-resolver";
+import { SubscriptionSyncer } from "./subscription-syncer";
 import { TransportProtocol } from "./transport-protocol";
 
 // ── Types & interfaces ──────────────────────────────────────────────
@@ -393,6 +394,72 @@ export function createServer<
 			);
 		}
 		return protocol;
+	}
+
+	// ── Subscription syncer (runtime subscriber-map sync) ───────────
+	//
+	// When a grant/revoke commits while the target actor is connected,
+	// the syncer updates their subscriber map and delivers current shard
+	// state. Registered as an internal afterCommit handler on the
+	// subscriptions channel — invisible to consumers.
+	if (subsConfigForResolver) {
+		const syncer = new SubscriptionSyncer<TActor>({
+			actorRegistry,
+			addConnectionToShard(connectionId, channelId, shardId) {
+				protocol?.ensureTransportSubscription(channelId, connectionId, [
+					shardId,
+				]);
+			},
+			removeConnectionFromShard(connectionId, channelId, shardId) {
+				const ch = channels.get(channelId);
+				ch?.removeShards(connectionId, [shardId]);
+			},
+			async sendShardState(connectionId, channelId, shardIds) {
+				const ch = channels.get(channelId);
+				if (!ch || !protocol) return;
+				const shardStates = await ch.loadShardStates(shardIds);
+				const entries: Array<{
+					shardId: string;
+					version: number;
+					state: unknown;
+				}> = [];
+				for (const [shardId, { state, version }] of shardStates) {
+					entries.push({ shardId, version, state });
+				}
+				if (entries.length > 0) {
+					protocol.sendToConnection(connectionId, {
+						type: "state",
+						channelId,
+						kind: ch.kind,
+						shards: entries,
+					});
+				}
+			},
+		});
+
+		afterCommitHooks.register(
+			SUBSCRIPTIONS_CHANNEL_NAME,
+			"grant",
+			async ({ input }) => {
+				const typed = input as {
+					actorId: string;
+					ref: { channelId: string; shardId: string };
+				};
+				await syncer.onGrant(typed);
+			},
+		);
+
+		afterCommitHooks.register(
+			SUBSCRIPTIONS_CHANNEL_NAME,
+			"revoke",
+			({ input }) => {
+				const typed = input as {
+					actorId: string;
+					ref: { channelId: string; shardId: string };
+				};
+				syncer.onRevoke(typed);
+			},
+		);
 	}
 
 	// ── Consumer API ────────────────────────────────────────────────

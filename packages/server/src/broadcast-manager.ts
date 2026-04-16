@@ -25,6 +25,23 @@ export class BroadcastManager {
 		this.dirtySets.set(subscriber.id, new Set());
 	}
 
+	/**
+	 * Ensure a subscriber exists and has at least the given shardIds.
+	 * Creates the subscriber if new; extends its shard set if it already
+	 * exists — existing subscriptions are preserved.
+	 */
+	ensureSubscriberShards(
+		subscriber: Subscriber,
+		shardIds: readonly string[],
+	): void {
+		if (!this.subscribers.has(subscriber.id)) {
+			this.addSubscriber(subscriber, shardIds);
+			return;
+		}
+		this.subscribers.set(subscriber.id, subscriber);
+		this.addShards(subscriber.id, shardIds);
+	}
+
 	removeSubscriber(subscriberId: string): void {
 		this.subscribers.delete(subscriberId);
 		this.subscriberShards.delete(subscriberId);

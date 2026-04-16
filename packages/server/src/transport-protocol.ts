@@ -123,6 +123,21 @@ export class TransportProtocol<TActor extends BaseActor> {
 		ch.removeSubscriber(connectionId);
 	}
 
+	/**
+	 * Ensure a connection is subscribed to specific shards on a channel.
+	 * Creates the subscriber if it doesn't exist; extends its shard set
+	 * if it does.
+	 */
+	ensureTransportSubscription(
+		channelName: string,
+		connectionId: string,
+		shardIds: readonly string[],
+	): void {
+		const ch = this.channels.get(channelName);
+		if (!ch) return;
+		ch.ensureSubscriberShards(this.createSubscriber(connectionId), shardIds);
+	}
+
 	private getChannelOrThrow(channelName: string): ChannelRuntime {
 		const ch = this.channels.get(channelName);
 		if (!ch) {
@@ -131,8 +146,17 @@ export class TransportProtocol<TActor extends BaseActor> {
 		return ch;
 	}
 
-	private send(connectionId: string, message: ServerMessage): void {
+	/**
+	 * Send a message to a specific connection. Public so the subscription
+	 * syncer can push state messages to live connections after a runtime
+	 * grant, using the same codec + transport as the rest of the protocol.
+	 */
+	sendToConnection(connectionId: string, message: ServerMessage): void {
 		this.transport.send(connectionId, this.codec.encode(message));
+	}
+
+	private send(connectionId: string, message: ServerMessage): void {
+		this.sendToConnection(connectionId, message);
 	}
 
 	private createSubscriber(connectionId: string): Subscriber {

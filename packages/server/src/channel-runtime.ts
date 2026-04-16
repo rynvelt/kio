@@ -105,6 +105,17 @@ export class ChannelRuntime {
 		this.broadcastManager.addSubscriber(subscriber, shardIds);
 	}
 
+	/**
+	 * Ensure a subscriber exists and has at least the given shards. Creates
+	 * the subscriber if new; extends its shard set if it already exists.
+	 */
+	ensureSubscriberShards(
+		subscriber: Subscriber,
+		shardIds: readonly string[],
+	): void {
+		this.broadcastManager.ensureSubscriberShards(subscriber, shardIds);
+	}
+
 	/** Remove a subscriber */
 	removeSubscriber(subscriberId: string): void {
 		this.broadcastManager.removeSubscriber(subscriberId);
