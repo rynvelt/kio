@@ -354,7 +354,7 @@ export function createServer<
 
 	// ── Consumer API ────────────────────────────────────────────────
 
-	return {
+	const base: Server<TChannels> = {
 		submit(channelName, operationName, input) {
 			return internalSubmit(
 				channelName as string,
@@ -407,35 +407,38 @@ export function createServer<
 				handler as AfterCommitHandler<unknown, TChannels>,
 			);
 		},
+	};
 
-		// ── Subscription helpers ────────────────────────────────────────
-		//
-		// These are always attached at runtime; the conditional return type
-		// hides them when the engine hasn't opted into subscriptions, so
-		// calling them in that case is a compile error. If a consumer
-		// bypasses the type system (cast), the underlying submit will throw
-		// "Channel 'subscriptions' is not registered" — acceptable
-		// fail-loud behavior.
-		grantSubscription(actorId: string, ref: SubscriptionShardEntry) {
-			return internalSubmit(
-				SUBSCRIPTIONS_CHANNEL_NAME,
-				"grant",
-				{ actorId, ref },
-				serverActor,
-				`server:${String(serverOpCounter++)}`,
-				0,
-			);
-		},
+	// Conditionally attach the subscription helpers at runtime. The declared
+	// return type hides them when subscriptions aren't enabled; this check
+	// ensures the runtime surface matches — JS consumers with no types can't
+	// call them by accident, and devtools show only the keys that actually work.
+	const subsEnabled = engineBuilder["~subscriptions"];
+	if (subsEnabled) {
+		const methods: SubscriptionMethods = {
+			grantSubscription(actorId, ref) {
+				return internalSubmit(
+					SUBSCRIPTIONS_CHANNEL_NAME,
+					"grant",
+					{ actorId, ref },
+					serverActor,
+					`server:${String(serverOpCounter++)}`,
+					0,
+				);
+			},
+			revokeSubscription(actorId, ref) {
+				return internalSubmit(
+					SUBSCRIPTIONS_CHANNEL_NAME,
+					"revoke",
+					{ actorId, ref },
+					serverActor,
+					`server:${String(serverOpCounter++)}`,
+					0,
+				);
+			},
+		};
+		Object.assign(base, methods);
+	}
 
-		revokeSubscription(actorId: string, ref: SubscriptionShardEntry) {
-			return internalSubmit(
-				SUBSCRIPTIONS_CHANNEL_NAME,
-				"revoke",
-				{ actorId, ref },
-				serverActor,
-				`server:${String(serverOpCounter++)}`,
-				0,
-			);
-		},
-	} as Server<TChannels> & ConditionalSubscriptionMethods<TSubs>;
+	return base as Server<TChannels> & ConditionalSubscriptionMethods<TSubs>;
 }

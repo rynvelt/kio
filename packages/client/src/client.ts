@@ -8,9 +8,14 @@ import type {
 	ServerMessage,
 	ShardState,
 	SubmitResult,
+	SubscriptionShardState,
 	SubscriptionsConfig,
 } from "@kio/shared";
-import { createSubscriptionsChannel, jsonCodec } from "@kio/shared";
+import {
+	createSubscriptionsChannel,
+	jsonCodec,
+	SUBSCRIPTIONS_CHANNEL_NAME,
+} from "@kio/shared";
 import { ClientChannelEngine } from "./client-channel-engine";
 
 /** Configuration for createClient */
@@ -50,6 +55,39 @@ export interface ClientChannel<Ch> {
 	subscribeToShard(shardId: string, listener: () => void): () => void;
 }
 
+/**
+ * Methods available on the Client only when the engine has opted in to
+ * the subscriptions feature via `engine({ subscriptions: { kind } })`.
+ * Let consumers observe their own subscription shard without knowing
+ * the internal channel name, shard ID format, or their actor ID.
+ */
+export interface ClientSubscriptionMethods {
+	/**
+	 * Snapshot of the actor's current subscription shard. Returns a
+	 * `"loading"` state when the welcome handshake hasn't arrived yet
+	 * (actor ID unknown).
+	 */
+	mySubscriptions(): ShardState<SubscriptionShardState>;
+
+	/**
+	 * Subscribe to changes on the actor's subscription shard. Listener
+	 * fires when the shard state changes via broadcasts. Returns an
+	 * unsubscribe function.
+	 */
+	subscribeToMySubscriptions(listener: () => void): () => void;
+}
+
+// biome-ignore lint/complexity/noBannedTypes: empty object for conditional intersection
+type EmptyMethods = {};
+
+/**
+ * Conditional addendum to {@link Client}: includes
+ * {@link ClientSubscriptionMethods} only when the engine's `TSubs` is a
+ * concrete config, otherwise nothing.
+ */
+export type ConditionalClientSubscriptionMethods<TSubs> =
+	TSubs extends SubscriptionsConfig ? ClientSubscriptionMethods : EmptyMethods;
+
 /** Typed client instance */
 export interface Client<TChannels extends object = object> {
 	channel<CName extends string & keyof TChannels>(
@@ -70,7 +108,7 @@ export function createClient<
 >(
 	engineBuilder: EngineBuilder<TChannels, TActor, TSubs>,
 	config: ClientConfig,
-): Client<TChannels> {
+): Client<TChannels> & ConditionalClientSubscriptionMethods<TSubs> {
 	const engines = new Map<string, ClientChannelEngine>();
 	let isReady = false;
 	const timeoutMs = config.submitTimeoutMs ?? 10_000;
@@ -110,6 +148,10 @@ export function createClient<
 				for (const eng of engines.values()) {
 					eng.setActor(message.actor);
 				}
+				// Now that actor IDs are known, attach any subscribeToMySubscriptions
+				// listeners that were queued before welcome arrived.
+				for (const thunk of pendingMySubs) thunk();
+				pendingMySubs.length = 0;
 				sendMessage({
 					type: "versions",
 					shards: collectLocalVersions(engines),
@@ -157,8 +199,56 @@ export function createClient<
 
 	const channelHandles = new Map<string, ClientChannel<never>>();
 
-	return {
-		channel(channelName) {
+	// Shard state returned by mySubscriptions() before the welcome handshake
+	// arrives — actor ID is unknown, so we can't construct the shard ID.
+	const MY_SUBS_LOADING: ShardState<SubscriptionShardState> = {
+		syncStatus: "loading",
+		state: null,
+		pending: null,
+	};
+
+	// Subscribe thunks queued by subscribeToMySubscriptions when the actor ID
+	// isn't known yet. Flushed in the welcome handler once setActor has run.
+	const pendingMySubs: Array<() => void> = [];
+
+	function mySubscriptions(): ShardState<SubscriptionShardState> {
+		const subsEng = engines.get(SUBSCRIPTIONS_CHANNEL_NAME);
+		if (!subsEng) return MY_SUBS_LOADING;
+		const actorId = subsEng.getActorId();
+		if (!actorId) return MY_SUBS_LOADING;
+		return subsEng.shardState(
+			`subscription:${actorId}`,
+		) as ShardState<SubscriptionShardState>;
+	}
+
+	function subscribeToMySubscriptions(listener: () => void): () => void {
+		const subsEng = engines.get(SUBSCRIPTIONS_CHANNEL_NAME);
+		if (!subsEng) return () => {};
+		const actorId = subsEng.getActorId();
+		if (actorId) {
+			return subsEng.subscribeToShard(`subscription:${actorId}`, listener);
+		}
+		// Pre-welcome: queue a thunk that subscribes once the actor is known.
+		// The returned unsubscribe works in either state.
+		let realUnsubscribe: (() => void) | null = null;
+		let cancelled = false;
+		pendingMySubs.push(() => {
+			if (cancelled) return;
+			const id = subsEng.getActorId();
+			if (!id) return;
+			realUnsubscribe = subsEng.subscribeToShard(
+				`subscription:${id}`,
+				listener,
+			);
+		});
+		return () => {
+			cancelled = true;
+			realUnsubscribe?.();
+		};
+	}
+
+	const base = {
+		channel(channelName: string & keyof TChannels) {
 			let handle = channelHandles.get(channelName);
 			if (!handle) {
 				const eng = engines.get(channelName);
@@ -166,13 +256,13 @@ export function createClient<
 					throw new Error(`Channel "${channelName}" is not registered`);
 				}
 				handle = {
-					submit(operationName, input) {
+					submit(operationName: string, input: unknown) {
 						return eng.submit(operationName, input);
 					},
-					shardState(shardId) {
+					shardState(shardId: string) {
 						return eng.shardState(shardId);
 					},
-					subscribeToShard(shardId, listener) {
+					subscribeToShard(shardId: string, listener: () => void) {
 						return eng.subscribeToShard(shardId, listener);
 					},
 				} as ClientChannel<never>;
@@ -183,7 +273,22 @@ export function createClient<
 		get ready() {
 			return isReady;
 		},
-	} as Client<TChannels>;
+	};
+
+	// Conditionally attach the subscription helpers at runtime. The declared
+	// return type hides them when subscriptions aren't enabled; this check
+	// ensures the runtime surface matches — JS consumers with no types can't
+	// call them by accident, and devtools show only the keys that actually work.
+	if (subsConfig) {
+		const methods: ClientSubscriptionMethods = {
+			mySubscriptions,
+			subscribeToMySubscriptions,
+		};
+		Object.assign(base, methods);
+	}
+
+	return base as Client<TChannels> &
+		ConditionalClientSubscriptionMethods<TSubs>;
 }
 
 /** Collect local shard versions from all engines for reconnect handshake */

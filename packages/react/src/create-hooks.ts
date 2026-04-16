@@ -1,11 +1,15 @@
-import type { Client } from "@kio/client";
+import type { Client, ClientSubscriptionMethods } from "@kio/client";
 import type {
+	BaseActor,
 	ChannelBuilder,
 	EngineBuilder,
 	InferChannels,
+	InferSubscriptions,
 	OpMeta,
 	ShardState,
 	SubmitResult,
+	SubscriptionShardState,
+	SubscriptionsConfig,
 } from "@kio/shared";
 import { useCallback, useSyncExternalStore } from "react";
 import { useKioClientInternal } from "./provider";
@@ -54,16 +58,68 @@ type OperationInput<Ch, OpName extends string> =
 			: never
 		: never;
 
+/** Hooks always available from createKioHooks. */
+interface BaseHooks<TChannels extends object> {
+	useShardState: {
+		<
+			CName extends string & keyof TChannels,
+			SName extends SingletonShardNames<TChannels[CName]>,
+		>(
+			channelName: CName,
+			shardId: SName,
+		): ShardState<SingletonState<TChannels[CName], SName>>;
+		<
+			CName extends string & keyof TChannels,
+			SName extends PerResourceShardNames<TChannels[CName]>,
+		>(
+			channelName: CName,
+			shardType: SName,
+			resourceId: string,
+		): ShardState<PerResourceState<TChannels[CName], SName>>;
+	};
+	useSubmit: <CName extends string & keyof TChannels>(
+		channelName: CName,
+	) => <OpName extends OperationNames<TChannels[CName]>>(
+		operationName: OpName,
+		input: OperationInput<TChannels[CName], OpName>,
+	) => Promise<SubmitResult>;
+}
+
+/** Hook available only when the engine opted into subscriptions. */
+interface SubscriptionHooks {
+	useMySubscriptions: () => ShardState<SubscriptionShardState>;
+}
+
+// biome-ignore lint/complexity/noBannedTypes: empty intersection neutral element
+type EmptyHooks = {};
+
 /**
  * Create typed React hooks from a client engine builder.
  *
- * Returns a `useShardState` hook (for singletons and per-resource shards)
- * and a `useSubmit` hook (typed operation names and inputs).
+ * Always returns `useShardState` (singleton + per-resource overloads) and
+ * `useSubmit` (typed operation names and inputs). When the engine has
+ * `subscriptions: { kind }` configured, also returns `useMySubscriptions`
+ * for observing the current actor's subscription shard.
+ *
+ * The engine is passed as a value (not just a type) so the factory can
+ * inspect `~subscriptions` at runtime and attach `useMySubscriptions`
+ * only when relevant — the returned object literally has no such property
+ * when subscriptions are disabled.
  */
 export function createKioHooks<
-	TEngine extends EngineBuilder,
-	TChannels extends object = InferChannels<TEngine>,
->() {
+	TEngine extends EngineBuilder<
+		object,
+		BaseActor,
+		SubscriptionsConfig | undefined
+	>,
+>(
+	engine: TEngine,
+): BaseHooks<InferChannels<TEngine>> &
+	(InferSubscriptions<TEngine> extends SubscriptionsConfig
+		? SubscriptionHooks
+		: EmptyHooks) {
+	type TChannels = InferChannels<TEngine>;
+
 	/**
 	 * Subscribe to a singleton shard's state.
 	 */
@@ -136,5 +192,40 @@ export function createKioHooks<
 		) as never;
 	}
 
-	return { useShardState, useSubmit };
+	/**
+	 * Subscribe to the current actor's subscription shard. Returns a
+	 * ShardState that transitions from "loading" (pre-welcome) through
+	 * "latest" as the server delivers the actor's ref set.
+	 */
+	function useMySubscriptions(): ShardState<SubscriptionShardState> {
+		// The client always has the methods at runtime when this hook is
+		// reachable — createKioHooks only attaches useMySubscriptions when the
+		// engine has subscriptions configured, and in that case createClient
+		// also attaches the methods. Narrow cast to the minimum needed.
+		const client =
+			useKioClientInternal() as unknown as ClientSubscriptionMethods;
+
+		const subscribe = useCallback(
+			(onStoreChange: () => void) =>
+				client.subscribeToMySubscriptions(onStoreChange),
+			[client],
+		);
+
+		const getSnapshot = useCallback(() => client.mySubscriptions(), [client]);
+
+		return useSyncExternalStore(subscribe, getSnapshot);
+	}
+
+	// Build the base hooks; attach useMySubscriptions only when the engine
+	// actually has subscriptions enabled — mirrors server/client behavior.
+	const base: BaseHooks<TChannels> = { useShardState, useSubmit };
+	if (engine["~subscriptions"]) {
+		const subsHooks: SubscriptionHooks = { useMySubscriptions };
+		Object.assign(base, subsHooks);
+	}
+
+	return base as BaseHooks<TChannels> &
+		(InferSubscriptions<TEngine> extends SubscriptionsConfig
+			? SubscriptionHooks
+			: EmptyHooks);
 }

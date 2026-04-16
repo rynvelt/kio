@@ -40,7 +40,7 @@ const presenceChannel = channel
 
 const appEngine = engine().register(counterChannel).register(presenceChannel);
 
-const { useShardState, useSubmit } = createKioHooks<typeof appEngine>();
+const { useShardState, useSubmit } = createKioHooks(appEngine);
 
 // ── useShardState: positive ─────────────────────────────────────────
 
@@ -92,4 +92,24 @@ function _wrongInput() {
 	const submit = useSubmit("presence");
 	// @ts-expect-error: "join" requires { id: string }, not {}
 	submit("join", {});
+}
+
+// ── useMySubscriptions: conditional presence ────────────────────────
+
+// Engine without subscriptions config → hook is NOT returned.
+const hooksNoSubs = createKioHooks(engine());
+// @ts-expect-error: useMySubscriptions not present when engine has no subs config
+hooksNoSubs.useMySubscriptions;
+
+// Engine with subscriptions config → hook IS returned.
+const hooksWithSubs = createKioHooks(
+	engine({ subscriptions: { kind: "ephemeral" } }),
+);
+function _validMySubs() {
+	const subs = hooksWithSubs.useMySubscriptions();
+	if (subs.syncStatus === "latest") {
+		// state.refs is typed
+		const _refs: ReadonlyArray<{ channelId: string; shardId: string }> =
+			subs.state.refs;
+	}
 }

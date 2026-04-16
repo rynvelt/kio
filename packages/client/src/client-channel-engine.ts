@@ -38,7 +38,7 @@ export class ClientChannelEngine {
 	/** Listeners registered before the store exists — attached when the store is created */
 	private readonly pendingListeners = new Map<string, Set<() => void>>();
 	private opCounter = 0;
-	private actor: { actorId: string } = { actorId: "" };
+	private actor: { actorId: string } | null = null;
 
 	constructor(
 		private readonly channelData: ChannelData,
@@ -49,6 +49,11 @@ export class ClientChannelEngine {
 	/** Set the actor — called when the server sends the welcome message */
 	setActor(actor: unknown): void {
 		this.actor = actor as { actorId: string };
+	}
+
+	/** Returns the actor's ID, or null if the welcome handshake has not arrived. */
+	getActorId(): string | null {
+		return this.actor?.actorId ?? null;
 	}
 
 	/**
@@ -195,7 +200,9 @@ export class ClientChannelEngine {
 	 * Returns a SubmitResult — never throws.
 	 */
 	async submit(operationName: string, input: unknown): Promise<SubmitResult> {
-		const opId = `${this.actor.actorId}:${this.channelData.name}:${String(this.opCounter++)}`;
+		// `?? ""` tolerates a pre-welcome submit (actor not yet set). Pre-existing
+		// behavior: the opId prefix is empty in that case; nothing downstream cares.
+		const opId = `${this.actor?.actorId ?? ""}:${this.channelData.name}:${String(this.opCounter++)}`;
 		const opDef = this.channelData.operations.get(operationName);
 
 		// Optimistic apply — predict locally before sending to server
@@ -361,7 +368,7 @@ export class ClientChannelEngine {
 		if (!shouldRetry) return false;
 
 		// Retry: new opId, remap pending + in-flight, recompute prediction, resend
-		const newOpId = `${this.actor.actorId}:${this.channelData.name}:${String(this.opCounter++)}`;
+		const newOpId = `${this.actor?.actorId ?? ""}:${this.channelData.name}:${String(this.opCounter++)}`;
 
 		this.pendingSubmits.delete(oldOpId);
 		this.pendingSubmits.set(newOpId, pending);
@@ -389,8 +396,10 @@ export class ClientChannelEngine {
 	}
 
 	private buildCtx(): { actor: { actorId: string }; channelId: string } {
+		// Fallback mirrors the opId-prefix case above: optimistic apply pre-welcome
+		// sees an empty actorId, but the connection isn't up so nothing observes it.
 		return {
-			actor: this.actor,
+			actor: this.actor ?? { actorId: "" },
 			channelId: this.channelData.name,
 		};
 	}

@@ -786,6 +786,36 @@ engine({ subscriptions: { kind: "something-else" } });
 // Narrow type on SubscriptionsConfig — future proofing.
 const _cfg: SubscriptionsConfig = { kind: "ephemeral" };
 
+// ── 33b. Client.mySubscriptions / subscribeToMySubscriptions are conditional ──
+
+import { createClient } from "@kio/client";
+import { createDirectTransport } from "@kio/shared";
+
+function _clientSubscriptionHelperTypes() {
+	const { client: transport } = createDirectTransport();
+
+	// Positive: engine with subscriptions config → Client has the helpers.
+	const clientWithSubs = createClient(
+		engine({ subscriptions: { kind: "ephemeral" } }),
+		{ transport },
+	);
+	const _snapshot = clientWithSubs.mySubscriptions();
+	// ShardState<SubscriptionShardState>: snapshot.state is the refs array
+	// shape when syncStatus is "latest"
+	if (_snapshot.syncStatus === "latest") {
+		const _refs: ReadonlyArray<{ channelId: string; shardId: string }> =
+			_snapshot.state.refs;
+	}
+	clientWithSubs.subscribeToMySubscriptions(() => {});
+
+	// Negative: engine without subscriptions config → methods don't exist.
+	const clientNoSubs = createClient(engine(), { transport });
+	// @ts-expect-error: mySubscriptions does not exist when subscriptions are off
+	clientNoSubs.mySubscriptions();
+	// @ts-expect-error: subscribeToMySubscriptions does not exist when subscriptions are off
+	clientNoSubs.subscribeToMySubscriptions(() => {});
+}
+
 // ── 33. Server.grantSubscription / revokeSubscription are conditional ──
 //
 // Wrapped in a never-called function: the checks are purely compile-time,
