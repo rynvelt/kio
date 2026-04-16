@@ -152,6 +152,10 @@ export function createClient<
 				// listeners that were queued before welcome arrived.
 				for (const thunk of pendingMySubs) thunk();
 				pendingMySubs.length = 0;
+				// Detects ref removals on the subscription shard and transitions
+				// the matching ShardStores to unavailable. Grants are handled by
+				// the server's point-to-point state push after a runtime grant.
+				installSubscriptionWatcher();
 				sendMessage({
 					type: "versions",
 					shards: collectLocalVersions(engines),
@@ -245,6 +249,48 @@ export function createClient<
 			cancelled = true;
 			realUnsubscribe?.();
 		};
+	}
+
+	// Tracks refs from the last observed subscription-shard state, so
+	// the watcher can diff and detect removals.
+	let watcherPreviousRefs: ReadonlyArray<{
+		channelId: string;
+		shardId: string;
+	}> = [];
+	let watcherInstalled = false;
+
+	/**
+	 * Install a listener on the actor's own subscription shard. On each
+	 * update, diff the refs against the previous set. For refs that
+	 * disappeared, revoke access on the matching ShardStore so the
+	 * client transitions it to unavailable.
+	 */
+	function installSubscriptionWatcher(): void {
+		const subsEng = engines.get(SUBSCRIPTIONS_CHANNEL_NAME);
+		if (!subsEng || watcherInstalled) return;
+		const actorId = subsEng.getActorId();
+		if (!actorId) return;
+		watcherInstalled = true;
+
+		subsEng.subscribeToShard(`subscription:${actorId}`, () => {
+			const snapshot = subsEng.shardState(`subscription:${actorId}`);
+			if (snapshot.syncStatus !== "latest" && snapshot.syncStatus !== "stale") {
+				return;
+			}
+			const currentRefs = (snapshot.state as unknown as SubscriptionShardState)
+				.refs;
+
+			for (const prev of watcherPreviousRefs) {
+				const stillPresent = currentRefs.some(
+					(r) => r.channelId === prev.channelId && r.shardId === prev.shardId,
+				);
+				if (!stillPresent) {
+					engines.get(prev.channelId)?.revokeShardAccess(prev.shardId);
+				}
+			}
+
+			watcherPreviousRefs = currentRefs;
+		});
 	}
 
 	const base = {

@@ -161,6 +161,11 @@ export class ClientChannelEngine {
 		pending: null,
 	};
 
+	/** Revoke access on a specific ShardStore, transitioning it to unavailable. */
+	revokeShardAccess(shardId: string): void {
+		this.stores.get(shardId)?.revokeAccess();
+	}
+
 	/** Get the ShardState snapshot for a shard */
 	shardState(shardId: string): ShardState<Record<string, unknown>> {
 		const store = this.stores.get(shardId);
