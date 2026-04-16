@@ -21,6 +21,10 @@ async function main() {
 				actorId: actor.actorId,
 				name: actor.name,
 			});
+			await server.submit("presence", "initPresence", {
+				actorId: actor.actorId,
+				name: actor.name,
+			});
 		},
 		async onDisconnect(actor) {
 			await server.submit("room", "leave", {

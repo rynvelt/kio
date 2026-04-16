@@ -87,6 +87,19 @@ export const presenceChannel = app.channel
 	.shardPerResource("player", locationState, {
 		defaultState: { name: "", x: 0, y: 0 },
 	})
+	.operation("initPresence", {
+		execution: "confirmed",
+		serverOnly: true,
+		versionChecked: false,
+		deduplicate: false,
+		input: v.object({ actorId: v.string(), name: v.string() }),
+		scope: (input) => [app.shard.ref("player", input.actorId)],
+	})
+	.serverImpl("initPresence", {
+		apply(shards, input) {
+			shards.player(input.actorId).name = input.name;
+		},
+	})
 	.operation("updateLocation", {
 		execution: "optimistic",
 		versionChecked: false,
