@@ -61,9 +61,15 @@ async function seedGame(adapter: MemoryStateAdapter): Promise<void> {
 function setupProtocol(
 	opts: {
 		actorSchema?: v.GenericSchema<BaseActor>;
-		defaultSubscriptions?: (
+		/**
+		 * Neutral handshake callback: given the actor, return the shards the
+		 * connection should subscribe to (grouped by channel). The real server
+		 * delegates this to SubscriptionResolver; tests can supply a simple
+		 * map directly.
+		 */
+		resolveInitialShards?: (
 			actor: BaseActor,
-		) => readonly { channelId: string; shardIds: readonly string[] }[];
+		) => Promise<ReadonlyMap<string, readonly string[]>>;
 		onConnect?: (actor: BaseActor) => void;
 		onDisconnect?: (actor: BaseActor, reason: string) => void;
 		submitOverride?: (
@@ -122,7 +128,7 @@ function setupProtocol(
 				opId: latest?.submission.opId ?? "",
 			});
 		},
-		defaultSubscriptions: opts.defaultSubscriptions,
+		resolveInitialShards: opts.resolveInitialShards ?? (async () => new Map()),
 		onConnect: opts.onConnect,
 		onDisconnect: opts.onDisconnect,
 	});
@@ -154,9 +160,7 @@ describe("TransportProtocol", () => {
 	describe("handshake step 1 (connect → welcome)", () => {
 		test("welcome contains validated actor and server shard versions", async () => {
 			const { client, connect, adapter } = setupProtocol({
-				defaultSubscriptions: () => [
-					{ channelId: "game", shardIds: ["world"] },
-				],
+				resolveInitialShards: async () => new Map([["game", ["world"]]]),
 			});
 			await seedGame(adapter);
 
@@ -198,7 +202,7 @@ describe("TransportProtocol", () => {
 			expect(disconnectedReason).toBe("closed by server");
 		});
 
-		test("welcome has empty shards when defaultSubscriptions omitted", async () => {
+		test("welcome has empty shards when resolveInitialShards returns empty", async () => {
 			const { client, connect, adapter } = setupProtocol();
 			await seedGame(adapter);
 
@@ -217,9 +221,7 @@ describe("TransportProtocol", () => {
 	describe("handshake step 2 (versions → state + ready)", () => {
 		test("state sent only for stale shards, then ready", async () => {
 			const { client, connect, adapter } = setupProtocol({
-				defaultSubscriptions: () => [
-					{ channelId: "game", shardIds: ["world"] },
-				],
+				resolveInitialShards: async () => new Map([["game", ["world"]]]),
 			});
 			await seedGame(adapter);
 
@@ -243,9 +245,7 @@ describe("TransportProtocol", () => {
 
 		test("up-to-date client receives only ready", async () => {
 			const { client, connect, adapter } = setupProtocol({
-				defaultSubscriptions: () => [
-					{ channelId: "game", shardIds: ["world"] },
-				],
+				resolveInitialShards: async () => new Map([["game", ["world"]]]),
 			});
 			await seedGame(adapter);
 
@@ -266,9 +266,7 @@ describe("TransportProtocol", () => {
 				order.push(`connect:${actor.actorId}`);
 			};
 			const { client, connect, adapter } = setupProtocol({
-				defaultSubscriptions: () => [
-					{ channelId: "game", shardIds: ["world"] },
-				],
+				resolveInitialShards: async () => new Map([["game", ["world"]]]),
 				onConnect,
 			});
 			await seedGame(adapter);
@@ -460,9 +458,7 @@ describe("TransportProtocol", () => {
 			const disconnects: Array<{ actor: BaseActor; reason: string }> = [];
 			const { client, connect, disconnect, adapter, gameRuntime, protocol } =
 				setupProtocol({
-					defaultSubscriptions: () => [
-						{ channelId: "game", shardIds: ["world"] },
-					],
+					resolveInitialShards: async () => new Map([["game", ["world"]]]),
 					onDisconnect: (actor, reason) => {
 						disconnects.push({ actor, reason });
 					},
@@ -497,9 +493,7 @@ describe("TransportProtocol", () => {
 			const connects: BaseActor[] = [];
 			const disconnects: Array<{ actor: BaseActor; reason: string }> = [];
 			const { client, connect, disconnect, adapter } = setupProtocol({
-				defaultSubscriptions: () => [
-					{ channelId: "game", shardIds: ["world"] },
-				],
+				resolveInitialShards: async () => new Map([["game", ["world"]]]),
 				onConnect: (a) => connects.push(a),
 				onDisconnect: (a, r) => disconnects.push({ actor: a, reason: r }),
 			});

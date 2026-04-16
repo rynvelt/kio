@@ -11,6 +11,7 @@ export type Actor = v.InferOutput<typeof actorSchema>;
 const kio = engine({
 	actor: actorSchema,
 	serverActor: { actorId: KIO_SERVER_ACTOR_ID, name: "Server" },
+	subscriptions: { kind: "ephemeral" },
 });
 
 const roomState = v.object({

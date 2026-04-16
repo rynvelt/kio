@@ -58,8 +58,12 @@ const presenceChannel = channel
 		},
 	});
 
-const serverEngine = engine().register(gameChannel).register(presenceChannel);
-const clientEngine = engine().register(gameChannel).register(presenceChannel);
+const serverEngine = engine({ subscriptions: { kind: "ephemeral" } })
+	.register(gameChannel)
+	.register(presenceChannel);
+const clientEngine = engine({ subscriptions: { kind: "ephemeral" } })
+	.register(gameChannel)
+	.register(presenceChannel);
 
 async function setupE2E() {
 	const adapter = new MemoryStateAdapter();
@@ -82,8 +86,9 @@ async function setupE2E() {
 		persistence: adapter,
 		transport: serverTransport,
 		defaultSubscriptions: () => [
-			{ channelId: "game", shardIds: ["world", "seat:1"] },
-			{ channelId: "presence", shardIds: ["player:alice"] },
+			{ channelId: "game", shardId: "world" },
+			{ channelId: "game", shardId: "seat:1" },
+			{ channelId: "presence", shardId: "player:alice" },
 		],
 	});
 
@@ -242,7 +247,8 @@ describe("End-to-end", () => {
 			persistence: adapter,
 			transport: serverTransport,
 			defaultSubscriptions: () => [
-				{ channelId: "game", shardIds: ["world", "seat:1"] },
+				{ channelId: "game", shardId: "world" },
+				{ channelId: "game", shardId: "seat:1" },
 			],
 		});
 

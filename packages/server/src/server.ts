@@ -5,7 +5,7 @@ import type {
 	EngineBuilder,
 	ServerTransport,
 	Subscriber,
-	SubscriptionShardEntry,
+	SubscriptionRef,
 	SubscriptionsConfig,
 } from "@kio/shared";
 import {
@@ -19,15 +19,10 @@ import { AfterCommitHooks } from "./after-commit-hooks";
 import { ChannelRuntime } from "./channel-runtime";
 import type { StateAdapter } from "./persistence";
 import type { AuthorizeFn, PipelineResult } from "./pipeline";
+import { SubscriptionResolver } from "./subscription-resolver";
 import { TransportProtocol } from "./transport-protocol";
 
 // ── Types & interfaces ──────────────────────────────────────────────
-
-/** Subscription entry: which channel and which shards */
-export interface SubscriptionRef {
-	readonly channelId: string;
-	readonly shardIds: readonly string[];
-}
 
 /** Context passed to the onAfterCommitError handler */
 export interface AfterCommitErrorContext {
@@ -54,18 +49,45 @@ function defaultOnAfterCommitError(
 	);
 }
 
-/** Configuration for createServer — TActor is inferred from the engine builder */
-export interface ServerConfig<TActor extends BaseActor = BaseActor> {
+/** Base server config — present regardless of engine subscriptions config. */
+interface BaseServerConfig<TActor extends BaseActor> {
 	readonly persistence: StateAdapter;
 	readonly transport?: ServerTransport;
 	/** Serialization codec used at the transport boundary. Defaults to `jsonCodec` (JSON + Set/Map support). */
 	readonly codec?: Codec;
 	readonly authorize?: AuthorizeFn;
-	readonly defaultSubscriptions?: (actor: TActor) => readonly SubscriptionRef[];
 	readonly onConnect?: (actor: TActor) => void;
 	readonly onDisconnect?: (actor: TActor, reason: string) => void;
 	readonly onAfterCommitError?: OnAfterCommitError;
 }
+
+/** Config fields only valid when the engine has subscriptions enabled. */
+interface SubscriptionsServerConfig<TActor extends BaseActor> {
+	/**
+	 * Seed refs for a brand-new actor's subscription shard. Called once per
+	 * actor, on their first-ever connect (when `subscription:{actorId}` has
+	 * version 0). Subsequent connects read the shard directly; revokes
+	 * persist. Only valid when the engine has `subscriptions: { kind }` set.
+	 */
+	readonly defaultSubscriptions?: (actor: TActor) => readonly SubscriptionRef[];
+}
+
+// biome-ignore lint/complexity/noBannedTypes: empty intersection neutral element
+type EmptyConfig = {};
+
+/**
+ * Configuration for createServer. `TActor` is inferred from the engine
+ * builder; `TSubs` gates subscription-specific fields like
+ * `defaultSubscriptions` — they only exist on the config type when the
+ * engine opted into subscriptions.
+ */
+export type ServerConfig<
+	TActor extends BaseActor = BaseActor,
+	TSubs extends SubscriptionsConfig | undefined = undefined,
+> = BaseServerConfig<TActor> &
+	(TSubs extends SubscriptionsConfig
+		? SubscriptionsServerConfig<TActor>
+		: EmptyConfig);
 
 /** Extract operation names from a ChannelBuilder's Ops type */
 type OperationNames<Ch> =
@@ -99,7 +121,7 @@ export interface SubscriptionMethods {
 	 */
 	grantSubscription(
 		actorId: string,
-		ref: SubscriptionShardEntry,
+		ref: SubscriptionRef,
 	): Promise<PipelineResult>;
 
 	/**
@@ -108,7 +130,7 @@ export interface SubscriptionMethods {
 	 */
 	revokeSubscription(
 		actorId: string,
-		ref: SubscriptionShardEntry,
+		ref: SubscriptionRef,
 	): Promise<PipelineResult>;
 }
 
@@ -222,7 +244,7 @@ export function createServer<
 	TSubs extends SubscriptionsConfig | undefined = undefined,
 >(
 	engineBuilder: EngineBuilder<TChannels, TActor, TSubs>,
-	config: ServerConfig<TActor>,
+	config: ServerConfig<TActor, TSubs>,
 ): Server<TChannels> & ConditionalSubscriptionMethods<TSubs> {
 	const channels = new Map<string, ChannelRuntime>();
 	const { transport } = config;
@@ -324,6 +346,26 @@ export function createServer<
 		return result;
 	}
 
+	// ── Subscription resolver ───────────────────────────────────────
+	//
+	// Owns all "what shards does this actor see at connect time" logic:
+	// reads the subscription shard (if enabled), bootstraps on first
+	// connect via defaultSubscriptions, auto-appends own shard ref.
+	// TransportProtocol uses this via a neutral `resolveInitialShards`
+	// callback and has no knowledge of subscriptions.
+	const subsConfigForResolver = engineBuilder["~subscriptions"];
+	const configWithSubs = config as BaseServerConfig<TActor> &
+		Partial<SubscriptionsServerConfig<TActor>>;
+	const subscriptionResolver = new SubscriptionResolver<TActor>({
+		subsChannel: subsConfigForResolver
+			? channels.get(SUBSCRIPTIONS_CHANNEL_NAME)
+			: undefined,
+		serverActor,
+		submit: (channelName, submission) =>
+			getChannelOrThrow(channelName).submit(submission),
+		defaultSubscriptions: configWithSubs.defaultSubscriptions,
+	});
+
 	// ── Transport protocol (only when transport is configured) ──────
 
 	const protocol = transport
@@ -337,7 +379,8 @@ export function createServer<
 				runAfterCommit: (channelName, result, actor, input) => {
 					fireAfterCommit(channelName, result, actor, input, 0);
 				},
-				defaultSubscriptions: config.defaultSubscriptions,
+				resolveInitialShards: (actor) =>
+					subscriptionResolver.resolveForActor(actor),
 				onConnect: config.onConnect,
 				onDisconnect: config.onDisconnect,
 			})

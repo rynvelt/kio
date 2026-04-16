@@ -20,6 +20,7 @@ export type {
 	Server,
 	ServerConfig,
 	SubscriptionMethods,
-	SubscriptionRef,
 } from "./server";
 export { createServer } from "./server";
+export type { SubscriptionResolverDeps } from "./subscription-resolver";
+export { SubscriptionResolver } from "./subscription-resolver";

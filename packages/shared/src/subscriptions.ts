@@ -6,10 +6,11 @@ import { shard } from "./shard";
 export const SUBSCRIPTIONS_CHANNEL_NAME = "subscriptions" as const;
 
 /**
- * One entry in an actor's subscription shard: permission to subscribe to
- * a single shard on a single channel.
+ * A reference to a single shard on a single channel — used both as an
+ * entry in the subscription shard's `refs` list and as the argument shape
+ * for `grantSubscription` / `revokeSubscription` / `defaultSubscriptions`.
  */
-export interface SubscriptionShardEntry {
+export interface SubscriptionRef {
 	readonly channelId: string;
 	readonly shardId: string;
 }
@@ -20,7 +21,7 @@ export interface SubscriptionShardEntry {
  * to read (receive broadcasts for).
  */
 export interface SubscriptionShardState {
-	readonly refs: readonly SubscriptionShardEntry[];
+	readonly refs: readonly SubscriptionRef[];
 }
 
 // ── Schemas ────────────────────────────────────────────────────────────

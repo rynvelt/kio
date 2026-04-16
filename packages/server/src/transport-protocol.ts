@@ -9,7 +9,6 @@ import type {
 import type { ActorRegistry } from "./actor-registry";
 import type { ChannelRuntime } from "./channel-runtime";
 import type { PipelineResult, Submission } from "./pipeline";
-import type { SubscriptionRef } from "./server";
 
 /** Dependencies for TransportProtocol — all seams flow in as refs/callbacks. */
 export interface TransportProtocolDeps<TActor extends BaseActor> {
@@ -29,7 +28,16 @@ export interface TransportProtocolDeps<TActor extends BaseActor> {
 		actor: BaseActor,
 		input: unknown,
 	) => void;
-	readonly defaultSubscriptions?: (actor: TActor) => readonly SubscriptionRef[];
+	/**
+	 * Given an authenticated actor, return the shards this connection
+	 * should subscribe to, grouped by channel. Transport does not care why
+	 * those shards were chosen — all domain logic (subscription shard
+	 * bootstrap, defaultSubscriptions, auto-append-own-shard) lives behind
+	 * this callback.
+	 */
+	readonly resolveInitialShards: (
+		actor: TActor,
+	) => Promise<ReadonlyMap<string, readonly string[]>>;
 	readonly onConnect?: (actor: TActor) => void;
 	readonly onDisconnect?: (actor: TActor, reason: string) => void;
 }
@@ -59,7 +67,7 @@ export class TransportProtocol<TActor extends BaseActor> {
 	private readonly channels: ReadonlyMap<string, ChannelRuntime>;
 	private readonly submit: TransportProtocolDeps<TActor>["submit"];
 	private readonly runAfterCommit: TransportProtocolDeps<TActor>["runAfterCommit"];
-	private readonly defaultSubscriptions: TransportProtocolDeps<TActor>["defaultSubscriptions"];
+	private readonly resolveInitialShards: TransportProtocolDeps<TActor>["resolveInitialShards"];
 	private readonly onConnect: TransportProtocolDeps<TActor>["onConnect"];
 	private readonly onDisconnect: TransportProtocolDeps<TActor>["onDisconnect"];
 	private readonly pendingHandshakes = new Map<
@@ -74,7 +82,7 @@ export class TransportProtocol<TActor extends BaseActor> {
 		this.channels = deps.channels;
 		this.submit = deps.submit;
 		this.runAfterCommit = deps.runAfterCommit;
-		this.defaultSubscriptions = deps.defaultSubscriptions;
+		this.resolveInitialShards = deps.resolveInitialShards;
 		this.onConnect = deps.onConnect;
 		this.onDisconnect = deps.onDisconnect;
 
@@ -142,8 +150,10 @@ export class TransportProtocol<TActor extends BaseActor> {
 	}
 
 	/**
-	 * Handshake step 1: validate actor, subscribe to default channels,
-	 * load shard states, send welcome.
+	 * Handshake step 1: validate actor, resolve which shards this connection
+	 * subscribes to (via the injected callback), register the transport as a
+	 * subscriber on each affected channel, load shard states for the welcome
+	 * payload, and send welcome.
 	 */
 	private async handleConnection(
 		connectionId: string,
@@ -163,20 +173,20 @@ export class TransportProtocol<TActor extends BaseActor> {
 			return;
 		}
 
-		const subscriptions = this.defaultSubscriptions?.(actor) ?? [];
+		const byChannel = await this.resolveInitialShards(actor);
 
 		const channelStates: PendingHandshake<TActor>["channelStates"] = [];
 		const serverVersions: Record<string, number> = {};
 
-		for (const sub of subscriptions) {
-			const ch = this.channels.get(sub.channelId);
+		for (const [channelId, shardIds] of byChannel) {
+			const ch = this.channels.get(channelId);
 			if (!ch) continue;
 
-			ch.addSubscriber(this.createSubscriber(connectionId), sub.shardIds);
+			ch.addSubscriber(this.createSubscriber(connectionId), shardIds);
 
-			const shardStates = await ch.loadShardStates(sub.shardIds);
+			const shardStates = await ch.loadShardStates(shardIds);
 			channelStates.push({
-				channelId: sub.channelId,
+				channelId,
 				kind: ch.kind,
 				shardStates,
 			});

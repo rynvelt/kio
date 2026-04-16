@@ -57,7 +57,11 @@ function setupServerEngine() {
 			},
 		});
 
-	const serverEngine = engine().register(gameChannel).register(presenceChannel);
+	const serverEngine = engine({
+		subscriptions: { kind: "ephemeral" },
+	})
+		.register(gameChannel)
+		.register(presenceChannel);
 
 	return serverEngine;
 }
@@ -215,9 +219,7 @@ describe("createServer", () => {
 			createServer(setupServerEngine(), {
 				persistence: adapter,
 				transport: serverTransport,
-				defaultSubscriptions: () => [
-					{ channelId: "game", shardIds: ["world"] },
-				],
+				defaultSubscriptions: () => [{ channelId: "game", shardId: "world" }],
 			});
 
 			const received: ServerMessage[] = [];
@@ -365,9 +367,7 @@ describe("createServer", () => {
 			createServer(setupServerEngine(), {
 				persistence: adapter,
 				transport: serverTransport,
-				defaultSubscriptions: () => [
-					{ channelId: "game", shardIds: ["world"] },
-				],
+				defaultSubscriptions: () => [{ channelId: "game", shardId: "world" }],
 			});
 
 			const received: ServerMessage[] = [];
@@ -377,10 +377,8 @@ describe("createServer", () => {
 			await new Promise((r) => setTimeout(r, 10));
 
 			// Step 1: server sends welcome with actor + versions
-			expect(received).toHaveLength(1);
-			const welcome = received[0];
+			const welcome = received.find((m) => m.type === "welcome");
 			expectToBeDefined(welcome);
-			expect(welcome.type).toBe("welcome");
 			if (welcome.type === "welcome") {
 				expect(welcome.shards.world).toBe(1);
 				expect(welcome.actor).toBeDefined();
@@ -389,26 +387,24 @@ describe("createServer", () => {
 			// Step 2: client responds with its versions (empty = first connect)
 			client.send({ type: "versions", shards: {} });
 
-			// Server sends state + ready
-			expect(received).toHaveLength(3);
-			const stateMsg = received[1];
-			expectToBeDefined(stateMsg);
-			expect(stateMsg.type).toBe("state");
-			if (stateMsg.type === "state") {
-				expect(stateMsg.channelId).toBe("game");
-				expect(stateMsg.shards).toHaveLength(1);
-				const entry = stateMsg.shards[0];
+			// Assert on what matters: game state was delivered, handshake
+			// completed. The subscription shard delivers too but it's not
+			// what this test is about.
+			const gameState = received.find(
+				(m) => m.type === "state" && m.channelId === "game",
+			);
+			expectToBeDefined(gameState);
+			if (gameState.type === "state") {
+				const entry = gameState.shards.find((s) => s.shardId === "world");
 				expectToBeDefined(entry);
 				if ("state" in entry) {
 					expect(entry.state).toEqual({ stage: "PLAYING", turn: 0 });
 				}
 			}
-			const readyMsg = received[2];
-			expectToBeDefined(readyMsg);
-			expect(readyMsg.type).toBe("ready");
+			expect(received.some((m) => m.type === "ready")).toBe(true);
 		});
 
-		test("client with up-to-date version receives no state", async () => {
+		test("client with up-to-date version receives no state for that shard", async () => {
 			const adapter = new MemoryStateAdapter();
 			await adapter.compareAndSwap("game", "world", 0, {
 				stage: "PLAYING",
@@ -424,9 +420,7 @@ describe("createServer", () => {
 			createServer(setupServerEngine(), {
 				persistence: adapter,
 				transport: serverTransport,
-				defaultSubscriptions: () => [
-					{ channelId: "game", shardIds: ["world"] },
-				],
+				defaultSubscriptions: () => [{ channelId: "game", shardId: "world" }],
 			});
 
 			const received: ServerMessage[] = [];
@@ -435,14 +429,17 @@ describe("createServer", () => {
 			connect();
 			await new Promise((r) => setTimeout(r, 10));
 
-			// Client already has version 1
+			// Client reports already having game's world at version 1.
 			client.send({ type: "versions", shards: { world: 1 } });
 
-			// Only ready — no state sent
-			expect(received).toHaveLength(2);
-			const ready = received[1];
-			expectToBeDefined(ready);
-			expect(ready.type).toBe("ready");
+			// Intent: the server does not re-send state for the shard the
+			// client already has. Other shards (e.g. the auto-appended
+			// subscription shard) may still flow — not our concern here.
+			const gameStateSent = received.some(
+				(m) => m.type === "state" && m.channelId === "game",
+			);
+			expect(gameStateSent).toBe(false);
+			expect(received.some((m) => m.type === "ready")).toBe(true);
 		});
 
 		test("after handshake, subscriber receives future broadcasts", async () => {
@@ -461,9 +458,7 @@ describe("createServer", () => {
 			const server = createServer(setupServerEngine(), {
 				persistence: adapter,
 				transport: serverTransport,
-				defaultSubscriptions: () => [
-					{ channelId: "game", shardIds: ["world"] },
-				],
+				defaultSubscriptions: () => [{ channelId: "game", shardId: "world" }],
 			});
 
 			const received: ServerMessage[] = [];

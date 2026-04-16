@@ -22,7 +22,7 @@ async function main() {
 	const server = createServer(appEngine, {
 		persistence: adapter,
 		transport,
-		defaultSubscriptions: () => [{ channelId: "lobby", shardIds: ["room"] }],
+		defaultSubscriptions: () => [{ channelId: "lobby", shardId: "room" }],
 		async onConnect(actor) {
 			await server.submit("lobby", "join", {
 				actorId: actor.actorId,

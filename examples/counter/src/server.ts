@@ -13,8 +13,8 @@ async function main() {
 		persistence: adapter,
 		transport,
 		defaultSubscriptions: () => [
-			{ channelId: "counter", shardIds: ["count"] },
-			{ channelId: "presence", shardIds: ["users"] },
+			{ channelId: "counter", shardId: "count" },
+			{ channelId: "presence", shardId: "users" },
 		],
 		onConnect(actor) {
 			server.submit("presence", "join", { id: actor.actorId });

@@ -61,6 +61,6 @@ export const presenceChannel = channel
 		},
 	});
 
-export const appEngine = engine()
+export const appEngine = engine({ subscriptions: { kind: "ephemeral" } })
 	.register(counterChannel)
 	.register(presenceChannel);

@@ -50,7 +50,7 @@ export { buildShardAccessors } from "./shard-accessors";
 export type { PendingOperation, ShardState } from "./state";
 export type {
 	CreateSubscriptionsChannelOptions,
-	SubscriptionShardEntry,
+	SubscriptionRef,
 	SubscriptionShardState,
 	SubscriptionsChannel,
 } from "./subscriptions";
