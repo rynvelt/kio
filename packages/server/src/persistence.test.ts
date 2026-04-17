@@ -132,6 +132,56 @@ describe("MemoryStateAdapter", () => {
 		}
 	});
 
+	test("setMulti creates shards and returns versions", async () => {
+		const adapter = new MemoryStateAdapter();
+		const result = await adapter.setMulti([
+			{ channelId: "game", shardId: "a", newState: { value: 1 } },
+			{ channelId: "game", shardId: "b", newState: { value: 2 } },
+		]);
+
+		expect(result.versions.get("a")).toBe(1);
+		expect(result.versions.get("b")).toBe(1);
+
+		const a = await adapter.load("game", "a");
+		const b = await adapter.load("game", "b");
+		expect(a).toEqual({ state: { value: 1 }, version: 1 });
+		expect(b).toEqual({ state: { value: 2 }, version: 1 });
+	});
+
+	test("setMulti increments versions on existing shards", async () => {
+		const adapter = new MemoryStateAdapter();
+		await adapter.set("game", "a", { value: 0 });
+		await adapter.set("game", "a", { value: 1 });
+		await adapter.set("game", "b", { value: 0 });
+
+		const result = await adapter.setMulti([
+			{ channelId: "game", shardId: "a", newState: { value: 99 } },
+			{ channelId: "game", shardId: "b", newState: { value: 88 } },
+		]);
+
+		expect(result.versions.get("a")).toBe(3);
+		expect(result.versions.get("b")).toBe(2);
+	});
+
+	test("setMulti with empty array returns empty versions", async () => {
+		const adapter = new MemoryStateAdapter();
+		const result = await adapter.setMulti([]);
+		expect(result.versions.size).toBe(0);
+	});
+
+	test("setMulti across channels is independent", async () => {
+		const adapter = new MemoryStateAdapter();
+		await adapter.setMulti([
+			{ channelId: "game", shardId: "x", newState: { g: 1 } },
+			{ channelId: "presence", shardId: "x", newState: { p: 1 } },
+		]);
+
+		const g = await adapter.load("game", "x");
+		const p = await adapter.load("presence", "x");
+		expect(g?.state).toEqual({ g: 1 });
+		expect(p?.state).toEqual({ p: 1 });
+	});
+
 	test("different channels are independent", async () => {
 		const adapter = new MemoryStateAdapter();
 		await adapter.compareAndSwap("game", "world", 0, { stage: "PLAYING" });

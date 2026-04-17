@@ -153,4 +153,39 @@ describe("PrismaStateAdapter", () => {
 			expect(result.success).toBe(true);
 		});
 	});
+
+	describe("setMulti", () => {
+		test("creates shards on first write", async () => {
+			const result = await adapter.setMulti([
+				{ channelId: "game", shardId: "set-multi-a", newState: { v: 1 } },
+				{ channelId: "game", shardId: "set-multi-b", newState: { v: 2 } },
+			]);
+
+			expect(result.versions.get("set-multi-a")).toBe(1);
+			expect(result.versions.get("set-multi-b")).toBe(1);
+
+			const a = await adapter.load("game", "set-multi-a");
+			const b = await adapter.load("game", "set-multi-b");
+			expect(a?.state).toEqual({ v: 1 });
+			expect(b?.state).toEqual({ v: 2 });
+		});
+
+		test("increments versions on existing shards", async () => {
+			await adapter.set("game", "set-multi-c", { v: 0 });
+			await adapter.set("game", "set-multi-c", { v: 1 });
+
+			const result = await adapter.setMulti([
+				{ channelId: "game", shardId: "set-multi-c", newState: { v: 9 } },
+				{ channelId: "game", shardId: "set-multi-d", newState: { v: 1 } },
+			]);
+
+			expect(result.versions.get("set-multi-c")).toBe(3);
+			expect(result.versions.get("set-multi-d")).toBe(1);
+		});
+
+		test("empty operations returns empty versions", async () => {
+			const result = await adapter.setMulti([]);
+			expect(result.versions.size).toBe(0);
+		});
+	});
 });

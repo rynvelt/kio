@@ -230,15 +230,22 @@ export class ShardStateManager {
 
 	/**
 	 * Persist unconditionally — no version check. For versionChecked: false operations.
+	 * Multi-shard writes are atomic (all-or-nothing) via the adapter's setMulti.
 	 * Always succeeds. Updates cache.
 	 */
 	async persistUnconditional(
 		shardIds: readonly string[],
 		newRoot: Record<string, unknown>,
 	): Promise<{ versions: Map<string, number> }> {
+		if (shardIds.length === 0) {
+			return { versions: new Map() };
+		}
+
 		const versions = new Map<string, number>();
 
-		for (const shardId of shardIds) {
+		if (shardIds.length === 1) {
+			const shardId = shardIds[0];
+			if (shardId === undefined) return { versions };
 			const result = await this.adapter.set(
 				this.channelId,
 				shardId,
@@ -250,6 +257,25 @@ export class ShardStateManager {
 			});
 			this.notifyChange(shardId);
 			versions.set(shardId, result.version);
+			return { versions };
+		}
+
+		const operations = shardIds.map((shardId) => ({
+			channelId: this.channelId,
+			shardId,
+			newState: newRoot[shardId],
+		}));
+		const result = await this.adapter.setMulti(operations);
+
+		for (const shardId of shardIds) {
+			const newVersion = result.versions.get(shardId);
+			if (newVersion === undefined) continue;
+			this.cache.set(shardId, {
+				state: newRoot[shardId],
+				version: newVersion,
+			});
+			this.notifyChange(shardId);
+			versions.set(shardId, newVersion);
 		}
 
 		return { versions };

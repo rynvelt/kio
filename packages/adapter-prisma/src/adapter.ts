@@ -88,6 +88,42 @@ export class PrismaStateAdapter implements StateAdapter {
 		};
 	}
 
+	async setMulti(
+		operations: ReadonlyArray<{
+			readonly channelId: string;
+			readonly shardId: string;
+			readonly newState: unknown;
+		}>,
+	): Promise<{ readonly versions: ReadonlyMap<string, number> }> {
+		if (operations.length === 0) {
+			return { versions: new Map() };
+		}
+
+		return await this.prisma.$transaction(async (tx) => {
+			const versions = new Map<string, number>();
+			for (const op of operations) {
+				const state = op.newState as Parameters<typeof JSON.stringify>[0];
+				const row = await tx.shardState.upsert({
+					where: {
+						channelId_shardId: {
+							channelId: op.channelId,
+							shardId: op.shardId,
+						},
+					},
+					update: { state, version: { increment: 1 } },
+					create: {
+						channelId: op.channelId,
+						shardId: op.shardId,
+						state,
+						version: 1,
+					},
+				});
+				versions.set(op.shardId, row.version);
+			}
+			return { versions };
+		});
+	}
+
 	async compareAndSwapMulti(
 		operations: ReadonlyArray<{
 			readonly channelId: string;

@@ -85,6 +85,22 @@ export interface StateAdapter {
 			readonly newState: unknown;
 		}>,
 	): Promise<CasMultiResult>;
+
+	/**
+	 * Unconditional atomic multi-shard write. Either all shards are written or none
+	 * are — no partial commits. Each shard's version is incremented by 1 (or set to 1
+	 * if absent), and the returned map carries the post-write versions.
+	 * Used for versionChecked: false operations whose scope covers multiple shards.
+	 * Implementations should use a database transaction or equivalent atomic mechanism.
+	 * Throws on infrastructure errors.
+	 */
+	setMulti(
+		operations: ReadonlyArray<{
+			readonly channelId: string;
+			readonly shardId: string;
+			readonly newState: unknown;
+		}>,
+	): Promise<{ readonly versions: ReadonlyMap<string, number> }>;
 }
 
 /** In-memory persistence adapter for testing */
@@ -170,16 +186,47 @@ export class MemoryStateAdapter implements StateAdapter {
 			}
 		}
 
-		// All matched — apply all
+		// All matched — stage writes, then apply. The apply pass is pure Map.set
+		// calls so it cannot throw midway and leave a partial commit.
+		const writes = operations.map((op) => ({
+			key: this.key(op.channelId, op.shardId),
+			shardId: op.shardId,
+			state: op.newState,
+			version:
+				(this.store.get(this.key(op.channelId, op.shardId))?.version ?? 0) + 1,
+		}));
+
 		const versions = new Map<string, number>();
-		for (const op of operations) {
-			const k = this.key(op.channelId, op.shardId);
-			const entry = this.store.get(k);
-			const newVersion = (entry?.version ?? 0) + 1;
-			this.store.set(k, { state: op.newState, version: newVersion });
-			versions.set(op.shardId, newVersion);
+		for (const w of writes) {
+			this.store.set(w.key, { state: w.state, version: w.version });
+			versions.set(w.shardId, w.version);
 		}
 
 		return { success: true, versions };
+	}
+
+	async setMulti(
+		operations: ReadonlyArray<{
+			readonly channelId: string;
+			readonly shardId: string;
+			readonly newState: unknown;
+		}>,
+	): Promise<{ readonly versions: ReadonlyMap<string, number> }> {
+		// Stage writes, then apply. The apply pass is pure Map.set so it cannot
+		// throw midway and leave a partial commit.
+		const writes = operations.map((op) => ({
+			key: this.key(op.channelId, op.shardId),
+			shardId: op.shardId,
+			state: op.newState,
+			version:
+				(this.store.get(this.key(op.channelId, op.shardId))?.version ?? 0) + 1,
+		}));
+
+		const versions = new Map<string, number>();
+		for (const w of writes) {
+			this.store.set(w.key, { state: w.state, version: w.version });
+			versions.set(w.shardId, w.version);
+		}
+		return { versions };
 	}
 }

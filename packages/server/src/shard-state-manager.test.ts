@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { type ShardDefinition, shard } from "@kio/shared";
-import { MemoryStateAdapter } from "./persistence";
+import { MemoryStateAdapter, type StateAdapter } from "./persistence";
 import { ShardStateManager } from "./shard-state-manager";
 
 function createManager(
@@ -308,6 +308,92 @@ describe("ShardStateManager", () => {
 				expect(result.versions.get("seat:1")).toBe(2);
 				expect(result.versions.get("seat:2")).toBe(2);
 			}
+		});
+	});
+
+	describe("persistUnconditional", () => {
+		test("single shard uses adapter.set", async () => {
+			const { manager } = createManager([["world", "singleton"]]);
+			const { versions } = await manager.persistUnconditional(["world"], {
+				world: { stage: "PLAYING" },
+			});
+			expect(versions.get("world")).toBe(1);
+			expect(manager.getCached("world")).toEqual({
+				state: { stage: "PLAYING" },
+				version: 1,
+			});
+		});
+
+		test("multi shard writes atomically via setMulti", async () => {
+			const { manager, adapter } = createManager([["seat", "perResource"]]);
+
+			const newRoot = {
+				"seat:1": { items: ["sword"] },
+				"seat:2": { items: ["shield"] },
+			};
+			const { versions } = await manager.persistUnconditional(
+				["seat:1", "seat:2"],
+				newRoot,
+			);
+
+			expect(versions.get("seat:1")).toBe(1);
+			expect(versions.get("seat:2")).toBe(1);
+
+			// Both cache and adapter reflect the write
+			expect(manager.getCached("seat:1")?.version).toBe(1);
+			expect(manager.getCached("seat:2")?.version).toBe(1);
+			expect((await adapter.load("game", "seat:1"))?.state).toEqual({
+				items: ["sword"],
+			});
+			expect((await adapter.load("game", "seat:2"))?.state).toEqual({
+				items: ["shield"],
+			});
+		});
+
+		test("multi shard setMulti failure leaves no partial writes", async () => {
+			const { adapter } = createManager([["seat", "perResource"]]);
+			await adapter.set("game", "seat:1", { items: ["existing"] });
+
+			// Fault-injecting adapter wrapper: throws from setMulti. Delegated
+			// explicitly because spreading a class instance drops prototype methods.
+			const throwingAdapter: StateAdapter = {
+				load: (c, s) => adapter.load(c, s),
+				set: (c, s, n) => adapter.set(c, s, n),
+				compareAndSwap: (c, s, v, n) => adapter.compareAndSwap(c, s, v, n),
+				compareAndSwapMulti: (ops) => adapter.compareAndSwapMulti(ops),
+				setMulti: async () => {
+					throw new Error("infra down");
+				},
+			};
+			const faultyManager = new ShardStateManager(
+				"game",
+				new Map([
+					[
+						"seat",
+						{
+							name: "seat",
+							kind: "perResource" as const,
+							// biome-ignore lint/suspicious/noExplicitAny: test helper
+							schema: {} as any,
+							defaultState: undefined,
+						},
+					],
+				]),
+				throwingAdapter,
+			);
+
+			await expect(
+				faultyManager.persistUnconditional(["seat:1", "seat:2"], {
+					"seat:1": { items: ["new"] },
+					"seat:2": { items: ["also-new"] },
+				}),
+			).rejects.toThrow("infra down");
+
+			// The real adapter still holds only the pre-existing seat:1
+			expect((await adapter.load("game", "seat:1"))?.state).toEqual({
+				items: ["existing"],
+			});
+			expect(await adapter.load("game", "seat:2")).toBeUndefined();
 		});
 	});
 });
