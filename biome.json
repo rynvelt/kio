@@ -7,7 +7,13 @@
 	},
 	"files": {
 		"ignoreUnknown": false,
-		"includes": ["**", "!apps/kio-docs", "!**/*.check.ts", "!**/generated"]
+		"includes": [
+			"**",
+			"!apps/kio-docs",
+			"!**/*.check.ts",
+			"!**/generated",
+			"!**/routeTree.gen.ts"
+		]
 	},
 	"formatter": {
 		"enabled": true,
