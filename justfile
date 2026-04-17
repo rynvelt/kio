@@ -12,6 +12,17 @@ typecheck:
 clean-ts:
     @find . -path '*/node_modules/.tmp/tsconfig.tsbuildinfo' -delete 2>/dev/null || true
 
+# Build all publishable packages (emits dist/ per package for npm consumers)
+build:
+    @for pkg in shared client server react transport-ws transport-bun-ws; do \
+        echo "→ build @kio/$pkg"; \
+        cd {{root_dir}}/packages/$pkg && rm -rf dist && bunx tsgo -p tsconfig.build.json || exit 1; \
+    done
+
+# Remove all dist/ output
+clean-dist:
+    @find packages -maxdepth 2 -type d -name dist -prune -exec rm -rf {} +
+
 # Run linter and formatter checks
 check:
     @bunx biome check .

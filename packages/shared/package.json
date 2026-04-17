@@ -1,18 +1,47 @@
 {
 	"name": "@kio/shared",
-	"version": "0.0.1",
+	"version": "0.1.0",
+	"description": "Shared types and builders for Kio — channels, operations, engine, transport contracts.",
+	"license": "MIT",
+	"author": "Sebastian Krebs",
+	"homepage": "https://github.com/rynvelt/kio#readme",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/rynvelt/kio.git",
+		"directory": "packages/shared"
+	},
+	"bugs": {
+		"url": "https://github.com/rynvelt/kio/issues"
+	},
+	"keywords": [
+		"kio",
+		"realtime",
+		"state-sync",
+		"multiplayer"
+	],
 	"type": "module",
+	"sideEffects": false,
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
 	"exports": {
 		".": {
 			"bun": "./src/index.ts",
-			"types": "./src/index.ts",
-			"default": "./src/index.ts"
+			"types": "./dist/index.d.ts",
+			"default": "./dist/index.js"
 		},
 		"./test": {
 			"bun": "./src/test.ts",
-			"types": "./src/test.ts",
-			"default": "./src/test.ts"
+			"types": "./dist/test.d.ts",
+			"default": "./dist/test.js"
 		}
+	},
+	"files": [
+		"dist",
+		"README.md",
+		"LICENSE"
+	],
+	"scripts": {
+		"build": "bunx tsgo -p tsconfig.build.json"
 	},
 	"dependencies": {
 		"@standard-schema/spec": "^1.1.0",
