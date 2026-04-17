@@ -1,5 +1,7 @@
 # Kio
 
+[![CI](https://github.com/rynvelt/kio/actions/workflows/ci.yml/badge.svg)](https://github.com/rynvelt/kio/actions/workflows/ci.yml)
+
 Authoritative state synchronization for real-time multiplayer applications. The server owns the truth; clients stay in sync via declarative operations, optimistic concurrency, and patch-based broadcasts.
 
 > **Early stage.** The implementation is functional but not yet versioned or published. Breaking changes are expected.
