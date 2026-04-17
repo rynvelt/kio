@@ -2,14 +2,20 @@
 	"extends": "../../tsconfig.base.json",
 	"compilerOptions": {
 		"noEmit": false,
+		"composite": true,
 		"declaration": true,
 		"declarationMap": true,
 		"sourceMap": true,
 		"rootDir": "./src",
 		"outDir": "./dist",
+		"tsBuildInfoFile": "./dist/.tsbuildinfo",
 		"lib": ["ESNext", "DOM"],
 		"jsx": "react-jsx"
 	},
 	"include": ["src/**/*"],
-	"exclude": ["src/**/*.test.ts", "src/**/*.check.ts"]
+	"exclude": ["src/**/*.test.ts", "src/**/*.check.ts"],
+	"references": [
+		{ "path": "../shared/tsconfig.build.json" },
+		{ "path": "../client/tsconfig.build.json" }
+	]
 }

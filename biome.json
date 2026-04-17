@@ -12,7 +12,9 @@
 			"!apps/kio-docs",
 			"!**/*.check.ts",
 			"!**/generated",
-			"!**/routeTree.gen.ts"
+			"!**/routeTree.gen.ts",
+			"!.scratch",
+			"!.claude"
 		]
 	},
 	"formatter": {
