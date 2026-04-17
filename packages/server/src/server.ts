@@ -17,6 +17,7 @@ import {
 import { ActorRegistry } from "./actor-registry";
 import { AfterCommitHooks } from "./after-commit-hooks";
 import { ChannelRuntime } from "./channel-runtime";
+import { type EventEmitter, safeEmit } from "./events";
 import type { StateAdapter } from "./persistence";
 import type { AuthorizeFn, PipelineResult } from "./pipeline";
 import { SubscriptionResolver } from "./subscription-resolver";
@@ -24,31 +25,6 @@ import { SubscriptionSyncer } from "./subscription-syncer";
 import { TransportProtocol } from "./transport-protocol";
 
 // ── Types & interfaces ──────────────────────────────────────────────
-
-/** Context passed to the onAfterCommitError handler */
-export interface AfterCommitErrorContext {
-	readonly channelName: string;
-	readonly operationName: string;
-	readonly actor: BaseActor;
-	readonly input: unknown;
-	readonly opId: string;
-}
-
-/** Reports errors thrown from afterCommit hooks. Hooks run fire-and-forget; this is the only observation point. */
-export type OnAfterCommitError = (
-	error: unknown,
-	ctx: AfterCommitErrorContext,
-) => void;
-
-function defaultOnAfterCommitError(
-	error: unknown,
-	ctx: AfterCommitErrorContext,
-): void {
-	console.error(
-		`[kio] afterCommit error in ${ctx.channelName}.${ctx.operationName}:`,
-		error,
-	);
-}
 
 /** Base server config — present regardless of engine subscriptions config. */
 interface BaseServerConfig<TActor extends BaseActor> {
@@ -59,7 +35,13 @@ interface BaseServerConfig<TActor extends BaseActor> {
 	readonly authorize?: AuthorizeFn;
 	readonly onConnect?: (actor: TActor) => void;
 	readonly onDisconnect?: (actor: TActor, reason: string) => void;
-	readonly onAfterCommitError?: OnAfterCommitError;
+	/**
+	 * Structured observability events (op lifecycle, CAS conflicts, broadcast
+	 * fanout, hook failures, connection lifecycle). Pipe into your logger /
+	 * metrics / tracing backend of choice. See {@link KioEvent} for the
+	 * discriminated union. Listener errors are swallowed.
+	 */
+	readonly onEvent?: EventEmitter;
 }
 
 /** Config fields only valid when the engine has subscriptions enabled. */
@@ -190,8 +172,8 @@ export interface Server<TChannels extends object = object> {
 	/**
 	 * Register a hook that runs after an operation has been applied and persisted
 	 * (i.e., after commit). Runs fire-and-forget — hook success/failure does not
-	 * affect the op's acknowledge or broadcast. Errors are routed to
-	 * `ServerConfig.onAfterCommitError`.
+	 * affect the op's acknowledge or broadcast. Errors are emitted as
+	 * `hook.failed` events to `ServerConfig.onEvent`.
 	 */
 	afterCommit<
 		CName extends string & keyof TChannels,
@@ -248,11 +230,9 @@ export function createServer<
 	config: ServerConfig<TActor, TSubs>,
 ): Server<TChannels> & ConditionalSubscriptionMethods<TSubs> {
 	const channels = new Map<string, ChannelRuntime>();
-	const { transport } = config;
+	const { transport, onEvent } = config;
 	const serverActor: BaseActor =
 		engineBuilder["~serverActor"] ?? KIO_SERVER_ACTOR;
-	const onAfterCommitError: OnAfterCommitError =
-		config.onAfterCommitError ?? defaultOnAfterCommitError;
 
 	// Setup: create channel runtimes
 	for (const [name, channelData] of engineBuilder["~channels"]) {
@@ -261,6 +241,7 @@ export function createServer<
 			new ChannelRuntime(channelData, config.persistence, {
 				authorize: config.authorize,
 				serverActorId: serverActor.actorId,
+				onEvent,
 			}),
 		);
 	}
@@ -276,6 +257,7 @@ export function createServer<
 			new ChannelRuntime(subsChannel["~data"], config.persistence, {
 				authorize: config.authorize,
 				serverActorId: serverActor.actorId,
+				onEvent,
 			}),
 		);
 	}
@@ -317,12 +299,21 @@ export function createServer<
 		afterCommitHooks
 			.run(channelName, result, actor, input, depth, boundSubmit)
 			.catch((err) => {
-				onAfterCommitError(err, {
-					channelName,
+				// Operator safety net — hooks are fire-and-forget, so without this a
+				// silently-broken hook would also be silently-invisible if the
+				// consumer hasn't wired up onEvent.
+				console.error(
+					`[kio] afterCommit error in ${channelName}.${result.operationName}:`,
+					err,
+				);
+				safeEmit(onEvent, {
+					type: "hook.failed",
+					timestamp: Date.now(),
+					channelId: channelName,
+					opId: result.opId,
 					operationName: result.operationName,
 					actor,
-					input,
-					opId: result.opId,
+					error: err,
 				});
 			});
 	}
@@ -382,8 +373,23 @@ export function createServer<
 				},
 				resolveInitialShards: (actor) =>
 					subscriptionResolver.resolveForActor(actor),
-				onConnect: config.onConnect,
-				onDisconnect: config.onDisconnect,
+				onConnect: (actor) => {
+					safeEmit(onEvent, {
+						type: "connection.opened",
+						timestamp: Date.now(),
+						actor,
+					});
+					config.onConnect?.(actor);
+				},
+				onDisconnect: (actor, reason) => {
+					safeEmit(onEvent, {
+						type: "connection.closed",
+						timestamp: Date.now(),
+						actor,
+						reason,
+					});
+					config.onDisconnect?.(actor, reason);
+				},
 			})
 		: undefined;
 

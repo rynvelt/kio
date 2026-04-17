@@ -14,8 +14,9 @@ import {
 	expectToBeDefined,
 } from "@kio/shared/test";
 import * as v from "valibot";
+import type { HookFailedEvent, KioEvent } from "./events";
 import { MemoryStateAdapter } from "./persistence";
-import { type AfterCommitErrorContext, createServer } from "./server";
+import { createServer } from "./server";
 
 function createSubscriber(
 	id: string,
@@ -535,7 +536,7 @@ describe("createServer", () => {
 
 			const server = createServer(setupServerEngine(), {
 				persistence: adapter,
-				onAfterCommitError: () => {},
+				onEvent: () => {},
 			});
 			server.afterCommit("game", "advanceTurn", () => {
 				throw new Error("hook fail");
@@ -545,17 +546,16 @@ describe("createServer", () => {
 			expect(result.status).toBe("acknowledged");
 		});
 
-		test("hook throw routes to onAfterCommitError with context", async () => {
+		test("hook throw emits hook.failed event with context", async () => {
 			const adapter = new MemoryStateAdapter();
 			await seedGame(adapter);
 
-			const errors: Array<{
-				error: unknown;
-				ctx: AfterCommitErrorContext;
-			}> = [];
+			const hookFailures: HookFailedEvent[] = [];
 			const server = createServer(setupServerEngine(), {
 				persistence: adapter,
-				onAfterCommitError: (error, ctx) => errors.push({ error, ctx }),
+				onEvent: (evt: KioEvent) => {
+					if (evt.type === "hook.failed") hookFailures.push(evt);
+				},
 			});
 			server.afterCommit("game", "advanceTurn", () => {
 				throw new Error("hook fail");
@@ -565,13 +565,12 @@ describe("createServer", () => {
 			// Hook is fire-and-forget; drain microtasks
 			await new Promise((r) => setTimeout(r, 0));
 
-			expect(errors).toHaveLength(1);
-			expect((errors[0]?.error as Error).message).toBe("hook fail");
-			expect(errors[0]?.ctx.channelName).toBe("game");
-			expect(errors[0]?.ctx.operationName).toBe("advanceTurn");
-			expect(errors[0]?.ctx.input).toEqual({});
-			expect(errors[0]?.ctx.actor.actorId).toBe("__kio:server__");
-			expect(errors[0]?.ctx.opId).toMatch(/^server:/);
+			expect(hookFailures).toHaveLength(1);
+			expect((hookFailures[0]?.error as Error).message).toBe("hook fail");
+			expect(hookFailures[0]?.channelId).toBe("game");
+			expect(hookFailures[0]?.operationName).toBe("advanceTurn");
+			expect(hookFailures[0]?.actor.actorId).toBe("__kio:server__");
+			expect(hookFailures[0]?.opId).toMatch(/^server:/);
 		});
 
 		test("Server.submit does not await the hook's async work", async () => {
@@ -600,17 +599,16 @@ describe("createServer", () => {
 			expect(hookFinished).toBe(true);
 		});
 
-		test("depth-limit error is reported via onAfterCommitError, not thrown from Server.submit", async () => {
+		test("depth-limit error surfaces as hook.failed event, not thrown from Server.submit", async () => {
 			const adapter = new MemoryStateAdapter();
 			await seedGame(adapter);
 
-			const errors: Array<{
-				error: unknown;
-				ctx: AfterCommitErrorContext;
-			}> = [];
+			const hookFailures: HookFailedEvent[] = [];
 			const server = createServer(setupServerEngine(), {
 				persistence: adapter,
-				onAfterCommitError: (error, ctx) => errors.push({ error, ctx }),
+				onEvent: (evt: KioEvent) => {
+					if (evt.type === "hook.failed") hookFailures.push(evt);
+				},
 			});
 			// Infinite self-chain
 			server.afterCommit("game", "advanceTurn", async ({ submit }) => {
@@ -624,20 +622,17 @@ describe("createServer", () => {
 			// Wait long enough for the chain to unwind to the depth limit
 			await new Promise((r) => setTimeout(r, 50));
 
-			const depthErr = errors.find((e) =>
+			const depthErr = hookFailures.find((e) =>
 				(e.error as Error).message?.includes("depth limit"),
 			);
 			expect(depthErr).toBeDefined();
 		});
 
-		test("client path: hook throw does not affect acknowledge, routes to onAfterCommitError", async () => {
+		test("client path: hook throw does not affect acknowledge, emits hook.failed", async () => {
 			const adapter = new MemoryStateAdapter();
 			await seedGame(adapter);
 
-			const errors: Array<{
-				error: unknown;
-				ctx: AfterCommitErrorContext;
-			}> = [];
+			const hookFailures: HookFailedEvent[] = [];
 			const {
 				client: rawClient,
 				server: serverTransport,
@@ -647,7 +642,9 @@ describe("createServer", () => {
 			const server = createServer(setupServerEngine(), {
 				persistence: adapter,
 				transport: serverTransport,
-				onAfterCommitError: (error, ctx) => errors.push({ error, ctx }),
+				onEvent: (evt: KioEvent) => {
+					if (evt.type === "hook.failed") hookFailures.push(evt);
+				},
 			});
 			server.afterCommit("game", "advanceTurn", () => {
 				throw new Error("hook fail");
@@ -675,9 +672,9 @@ describe("createServer", () => {
 			if (ack.type === "acknowledge") {
 				expect(ack.opId).toBe("op-1");
 			}
-			expect(errors).toHaveLength(1);
-			expect(errors[0]?.ctx.opId).toBe("op-1");
-			expect(errors[0]?.ctx.channelName).toBe("game");
+			expect(hookFailures).toHaveLength(1);
+			expect(hookFailures[0]?.opId).toBe("op-1");
+			expect(hookFailures[0]?.channelId).toBe("game");
 		});
 	});
 

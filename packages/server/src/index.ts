@@ -1,4 +1,16 @@
 export type {
+	BroadcastSentEvent,
+	CasConflictEvent,
+	ConnectionClosedEvent,
+	ConnectionOpenedEvent,
+	EventEmitter,
+	HookFailedEvent,
+	KioEvent,
+	OpCommittedEvent,
+	OpRejectedEvent,
+	OpSubmittedEvent,
+} from "./events";
+export type {
 	CasMultiResult,
 	CasResult,
 	PersistedShard,
@@ -13,10 +25,8 @@ export type {
 } from "./pipeline";
 export type {
 	AfterCommitContext,
-	AfterCommitErrorContext,
 	AfterCommitHandler,
 	ConditionalSubscriptionMethods,
-	OnAfterCommitError,
 	Server,
 	ServerConfig,
 	SubscriptionMethods,

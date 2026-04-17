@@ -1,5 +1,6 @@
 import type { CausedBy, ChannelData, Subscriber } from "@kio/shared";
 import { BroadcastManager } from "./broadcast-manager";
+import type { EventEmitter } from "./events";
 import type { StateAdapter } from "./persistence";
 import {
 	type AuthorizeFn,
@@ -16,6 +17,7 @@ export interface ChannelRuntimeConfig {
 	readonly authorize?: AuthorizeFn;
 	readonly deduplication?: DeduplicationTracker;
 	readonly serverActorId?: string;
+	readonly onEvent?: EventEmitter;
 }
 
 /**
@@ -48,11 +50,13 @@ export class ChannelRuntime {
 			authorize: config.authorize,
 			deduplication: config.deduplication ?? new MemoryDeduplicationTracker(),
 			serverActorId: config.serverActorId,
+			onEvent: config.onEvent,
 		});
 
 		this.broadcastManager = new BroadcastManager(
 			channelData.name,
 			channelData.kind,
+			config.onEvent,
 		);
 
 		// Wire state manager → broadcast manager for dirty tracking

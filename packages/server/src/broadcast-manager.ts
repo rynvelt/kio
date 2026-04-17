@@ -1,5 +1,6 @@
 import type { BroadcastShardEntry, CausedBy, Subscriber } from "@kio/shared";
 import type { Patch } from "immer";
+import { type EventEmitter, safeEmit } from "./events";
 
 /**
  * Manages subscribers and broadcasting.
@@ -17,6 +18,7 @@ export class BroadcastManager {
 	constructor(
 		private readonly channelId: string,
 		private readonly kind: "durable" | "ephemeral",
+		private readonly onEvent?: EventEmitter,
 	) {}
 
 	addSubscriber(subscriber: Subscriber, shardIds: readonly string[]): void {
@@ -89,6 +91,7 @@ export class BroadcastManager {
 		getShardState: (shardId: string) => unknown | undefined,
 		causedBy: CausedBy,
 	): void {
+		let subscriberCount = 0;
 		for (const [subscriberId, subscribedShards] of this.subscriberShards) {
 			const subscriber = this.subscribers.get(subscriberId);
 			if (!subscriber) continue;
@@ -111,8 +114,16 @@ export class BroadcastManager {
 					kind: this.kind,
 					shards: entries,
 				});
+				subscriberCount++;
 			}
 		}
+
+		this.emitBroadcastSent(
+			changedShardIds.length,
+			subscriberCount,
+			causedBy.opId,
+			causedBy.operation,
+		);
 	}
 
 	/**
@@ -138,6 +149,8 @@ export class BroadcastManager {
 		) => { state: unknown; version: number } | undefined,
 		shardIds?: readonly string[],
 	): void {
+		let subscriberCount = 0;
+		const touchedShards = new Set<string>();
 		for (const [subscriberId, dirtySet] of this.dirtySets) {
 			const subscriber = this.subscribers.get(subscriberId);
 			const subscribedShards = this.subscriberShards.get(subscriberId);
@@ -168,11 +181,22 @@ export class BroadcastManager {
 					kind: this.kind,
 					shards: entries,
 				});
+				subscriberCount++;
+				for (const shardId of shardsToFlush) touchedShards.add(shardId);
 			}
 
 			for (const shardId of shardsToFlush) {
 				dirtySet.delete(shardId);
 			}
+		}
+
+		if (subscriberCount > 0) {
+			this.emitBroadcastSent(
+				touchedShards.size,
+				subscriberCount,
+				undefined,
+				undefined,
+			);
 		}
 	}
 
@@ -182,6 +206,7 @@ export class BroadcastManager {
 		shardVersions: ReadonlyMap<string, number>,
 		causedBy: CausedBy,
 	): void {
+		let subscriberCount = 0;
 		for (const [subscriberId, subscribedShards] of this.subscriberShards) {
 			const subscriber = this.subscribers.get(subscriberId);
 			if (!subscriber) continue;
@@ -204,7 +229,32 @@ export class BroadcastManager {
 					kind: this.kind,
 					shards: entries,
 				});
+				subscriberCount++;
 			}
 		}
+
+		this.emitBroadcastSent(
+			changedShardIds.length,
+			subscriberCount,
+			causedBy.opId,
+			causedBy.operation,
+		);
+	}
+
+	private emitBroadcastSent(
+		shardCount: number,
+		subscriberCount: number,
+		opId: string | undefined,
+		operationName: string | undefined,
+	): void {
+		safeEmit(this.onEvent, {
+			type: "broadcast.sent",
+			timestamp: Date.now(),
+			channelId: this.channelId,
+			opId,
+			operationName,
+			shardCount,
+			subscriberCount,
+		});
 	}
 }

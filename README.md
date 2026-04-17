@@ -87,7 +87,7 @@ function Counter() {
 - `optimistic` - client runs `apply` locally for instant feedback; server re-runs canonical `apply` and broadcasts patches.
 - `computed` - server runs a `compute` step whose result drives `apply`. Useful for side-effectful logic the client cannot predict.
 
-**afterCommit hooks.** Server-side triggers that fire after an op has been applied and persisted. Fire-and-forget; errors route to `ServerConfig.onAfterCommitError`. Hooks can re-submit through `ctx.submit` with depth tracking to prevent infinite loops.
+**afterCommit hooks.** Server-side triggers that fire after an op has been applied and persisted. Fire-and-forget; errors surface as `hook.failed` events to `ServerConfig.onEvent`. Hooks can re-submit through `ctx.submit` with depth tracking to prevent infinite loops.
 
 **Actors.** Connection-scoped identity validated on connect, visible to `authorize`, `validate`, `apply`, and hooks.
 
@@ -115,7 +115,7 @@ op submitted
  afterCommit hooks (fire-and-forget)
 ```
 
-If CAS fails, the pipeline rejects with `VERSION_CONFLICT` and returns fresh state so the client can decide whether to retry. If a hook throws, the op is still acknowledged and broadcast; the error is delivered to `onAfterCommitError`.
+If CAS fails, the pipeline rejects with `VERSION_CONFLICT` and returns fresh state so the client can decide whether to retry. If a hook throws, the op is still acknowledged and broadcast; the error surfaces as a `hook.failed` event.
 
 Internally the server is composed from small pieces: `ChannelRuntime` (pipeline + broadcast per channel), `ActorRegistry` (connection → actor lookup), `TransportProtocol` (wire-protocol adapter), `AfterCommitHooks` (hook storage + depth check), `OperationPipeline` (the actual per-op steps), and `StateAdapter` (persistence).
 

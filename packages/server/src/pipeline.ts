@@ -5,6 +5,7 @@ import type {
 	ShardRef,
 } from "@kio/shared";
 import type { Patch } from "immer";
+import { type EventEmitter, safeEmit } from "./events";
 import type { ShardStateManager } from "./shard-state-manager";
 
 /** Actor identity for operation context */
@@ -107,6 +108,8 @@ export interface PipelineConfig {
 	readonly deduplication?: DeduplicationTracker;
 	/** If set, submissions from this actorId skip validate and authorize */
 	readonly serverActorId?: string;
+	/** Observability hook — see KioEvent. Errors from the listener are swallowed. */
+	readonly onEvent?: EventEmitter;
 }
 
 /** Runs the server-side operation pipeline */
@@ -118,19 +121,59 @@ export class OperationPipeline {
 	) {}
 
 	async submit(submission: Submission): Promise<PipelineResult> {
+		const startedAt = performance.now();
+		const channelId = this.channelData.name;
+		safeEmit(this.config.onEvent, {
+			type: "op.submitted",
+			timestamp: Date.now(),
+			channelId,
+			opId: submission.opId,
+			operationName: submission.operationName,
+			actor: submission.actor,
+		});
+
+		let result: PipelineResult;
 		try {
-			return await this.run(submission);
+			result = await this.run(submission);
 		} catch (err) {
 			console.error(
 				`[kio] INTERNAL_ERROR in ${submission.operationName}:`,
 				err,
 			);
-			return {
+			result = {
 				status: "rejected",
 				code: "INTERNAL_ERROR",
 				message: "An unexpected error occurred",
 			};
 		}
+
+		const durationMs = performance.now() - startedAt;
+		const now = Date.now();
+		if (result.status === "acknowledged") {
+			safeEmit(this.config.onEvent, {
+				type: "op.committed",
+				timestamp: now,
+				channelId,
+				opId: submission.opId,
+				operationName: submission.operationName,
+				actor: submission.actor,
+				durationMs,
+				shardIds: [...result.shardVersions.keys()],
+			});
+		} else {
+			safeEmit(this.config.onEvent, {
+				type: "op.rejected",
+				timestamp: now,
+				channelId,
+				opId: submission.opId,
+				operationName: submission.operationName,
+				actor: submission.actor,
+				code: result.code,
+				message: result.message,
+				durationMs,
+			});
+		}
+		return result;
 	}
 
 	private async run(submission: Submission): Promise<PipelineResult> {
@@ -298,6 +341,9 @@ export class OperationPipeline {
 				);
 
 				if (!persistResult.success) {
+					const failedShardId = persistResult.failedShardId;
+					const expectedVersion = dirtyShards.get(failedShardId)?.version ?? 0;
+
 					// Reload fresh state for dirty shards so clients can evaluate canRetry
 					const freshShards = await this.stateManager.loadShards(
 						scopeRefs.filter((ref) => dirtyShardIds.includes(ref.shardId)),
@@ -310,10 +356,22 @@ export class OperationPipeline {
 						}),
 					);
 
+					safeEmit(this.config.onEvent, {
+						type: "cas.conflict",
+						timestamp: Date.now(),
+						channelId: this.channelData.name,
+						opId,
+						operationName,
+						failedShardId,
+						expectedVersion,
+						currentVersion:
+							freshShards.get(failedShardId)?.version ?? expectedVersion,
+					});
+
 					return {
 						status: "rejected",
 						code: "VERSION_CONFLICT",
-						message: `Version conflict on shard "${persistResult.failedShardId}"`,
+						message: `Version conflict on shard "${failedShardId}"`,
 						shards,
 					};
 				}
