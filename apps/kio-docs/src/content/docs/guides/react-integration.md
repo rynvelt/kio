@@ -86,6 +86,25 @@ When the engine knows a newer version exists on the server (for example, after r
 
 This is a soft signal. The state is usable; it just might be slightly behind. Once the broadcast arrives, `syncStatus` transitions back to `"latest"` and the indicator disappears.
 
+### Fallback values
+
+Both variants of `useShardState` accept an optional `{ fallback }` that is returned as `state` whenever `syncStatus` is `"loading"` or `"unavailable"`. The return type narrows so `state` is always `T` — no guard clauses, no null checks:
+
+```tsx
+const world = useShardState("game", "world", {
+  fallback: { gameStage: "LOBBY", turnCount: 0 },
+})
+// world.state is always GameWorldState — even before the first broadcast
+
+const seat = useShardState("game", "seat", seatId, {
+  fallback: { inventory: [], position: { x: 0, y: 0 } },
+})
+```
+
+`syncStatus` and `pending` are still available on the returned object. Use them when you want to gate writes (e.g. disable buttons until `"latest"`) or show a soft "connecting..." indicator without hiding the UI.
+
+Use the fallback form when a sensible placeholder exists. Reach for the narrowing form when "state doesn't exist yet" is itself meaningful to the UI — for example, a per-resource shard where `unavailable` means "you haven't been granted access yet" and should render a different component.
+
 ## Submitting operations with `useSubmit`
 
 `useSubmit` returns a typed submit function scoped to a channel:
@@ -101,6 +120,19 @@ submit("useItem", { seatId, itemId: item.id })
 ```
 
 Passing an unknown operation name or a mismatched input shape is a compile-time error. The function mirrors `client.channel("game").submit(...)` but is more ergonomic inside components — no need to access the client directly.
+
+### Handling the result
+
+`submit()` returns a `SubmitResult` that never throws. It carries a boolean `ok` discriminant plus a `status` for callers that need to distinguish failure modes:
+
+```tsx
+const result = await submit("useItem", { seatId, itemId: item.id })
+if (!result.ok) {
+  toast.error(`Submit failed: ${result.status}`)
+}
+```
+
+For the common "succeed or surface an error" flow, `!result.ok` is enough. When the caller wants to react differently to `"rejected"` (server-side failure with a consumer-defined error code), `"blocked"` (another op on this shard is still in flight), `"timeout"`, or `"disconnected"`, switch on `result.status` — the discriminated union still narrows `result.error` where it exists.
 
 ## Putting it together
 

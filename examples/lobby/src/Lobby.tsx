@@ -12,28 +12,27 @@ import { useEffect, useState } from "react";
 import { useShardState, useSubmit } from "./hooks";
 import type { RoomState } from "./schema";
 
+const ROOM_FALLBACK: RoomState = {
+	phase: "waiting",
+	countdownEndsAt: null,
+	players: [],
+};
+
 export function Lobby({ actorId, name }: { actorId: string; name: string }) {
-	const room = useShardState("lobby", "room");
+	const room = useShardState("lobby", "room", { fallback: ROOM_FALLBACK });
 	const submit = useSubmit("lobby");
 
-	// Join the lobby on mount
 	useEffect(() => {
 		submit("join", { actorId, name });
 	}, [submit, actorId, name]);
 
-	if (room.syncStatus === "loading" || room.syncStatus === "unavailable") {
-		return (
-			<Container size="sm" mt="xl">
-				<Text>Connecting...</Text>
-			</Container>
-		);
-	}
+	const ready = room.syncStatus === "latest" || room.syncStatus === "stale";
 
-	const state = room.state as RoomState;
-
-	if (state.phase === "started") {
+	if (ready && room.state.phase === "started") {
 		return <GameStarted />;
 	}
+
+	const { state } = room;
 
 	return (
 		<Container size="sm" mt="xl">
@@ -45,6 +44,8 @@ export function Lobby({ actorId, name }: { actorId: string; name: string }) {
 						countdownEndsAt={state.countdownEndsAt}
 					/>
 				</Group>
+
+				{!ready && <Text c="dimmed">Connecting...</Text>}
 
 				<Stack gap="xs">
 					{state.players.map((player) => (
@@ -61,12 +62,12 @@ export function Lobby({ actorId, name }: { actorId: string; name: string }) {
 							}}
 						/>
 					))}
-					{state.players.length === 0 && (
+					{ready && state.players.length === 0 && (
 						<Text c="dimmed">No players yet...</Text>
 					)}
 				</Stack>
 
-				{state.players.length < 2 && (
+				{ready && state.players.length < 2 && (
 					<Text c="dimmed" size="sm">
 						Need at least 2 players to start
 					</Text>

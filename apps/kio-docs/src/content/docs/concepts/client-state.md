@@ -25,12 +25,12 @@ const shard = client.channel("game").shardState("seat", "seat:3")
 
 ## ShardState
 
-The `ShardState<T>` type is a discriminated union over `syncStatus`. Each variant narrows `state` and `pending` so the consumer never needs a null check after matching on status:
+The `ShardState<T, TFallback = null>` type is a discriminated union over `syncStatus`. Each variant narrows `state` and `pending` so the consumer never needs a null check after matching on status:
 
 ```ts
-type ShardState<T> =
-  | { syncStatus: "unavailable"; state: null; pending: null }
-  | { syncStatus: "loading"; state: null; pending: null }
+type ShardState<T, TFallback = null> =
+  | { syncStatus: "unavailable"; state: TFallback; pending: null }
+  | { syncStatus: "loading"; state: TFallback; pending: null }
   | { syncStatus: "stale"; state: T; pending: { operationName: string; input: unknown } | null }
   | { syncStatus: "latest"; state: T; pending: { operationName: string; input: unknown } | null }
 ```
@@ -45,6 +45,8 @@ const { state, pending } = shard
 // state is T — guaranteed non-null
 // pending is { operationName, input } | null
 ```
+
+The second type parameter controls `state` on `"unavailable"` and `"loading"`. It defaults to `null`, matching the raw snapshot. Hook overloads that accept a `fallback` option instead return `ShardState<T, T>` — the fallback is substituted into `state` whenever the shard isn't yet ready, so the consumer can read `state` without narrowing on `syncStatus`. See [React Integration](/guides/react-integration/#fallback-values) for usage.
 
 ## Connection state
 

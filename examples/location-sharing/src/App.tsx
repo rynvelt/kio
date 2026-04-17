@@ -81,29 +81,24 @@ function Dashboard({
 	myActorId: string;
 	myName: string;
 }) {
-	const room = useShardState("room", "room");
-	const myPresence = useShardState("presence", "player", myActorId);
-	const mySharing = useShardState("sharing", "actor", myActorId);
+	const room = useShardState("room", "room", {
+		fallback: { players: [] },
+	});
+	// x/y of -1 keeps the pin off the visible 0..GRID_SIZE-1 grid.
+	const myPresence = useShardState("presence", "player", myActorId, {
+		fallback: { name: "", x: -1, y: -1 },
+	});
+	const mySharing = useShardState("sharing", "actor", myActorId, {
+		fallback: { sharedWith: [] },
+	});
 	const mySubs = useMySubscriptions();
 	const submitPresence = useSubmit("presence");
 	const submitSharing = useSubmit("sharing");
 
-	if (room.syncStatus === "loading" || room.syncStatus === "unavailable") {
-		return (
-			<Container mt="xl">
-				<Text>Connecting...</Text>
-			</Container>
-		);
-	}
-
 	const players = room.state.players;
 	const otherPlayers = players.filter((p) => p.actorId !== myActorId);
-	const sharingWith =
-		mySharing.syncStatus === "latest" || mySharing.syncStatus === "stale"
-			? mySharing.state.sharedWith
-			: [];
+	const sharingWith = mySharing.state.sharedWith;
 
-	// Derive which other players' presence we can see via subscription refs.
 	const sharedPresenceShardIds: string[] = [];
 	if (mySubs.syncStatus === "latest" || mySubs.syncStatus === "stale") {
 		for (const ref of mySubs.state.refs) {
@@ -116,10 +111,7 @@ function Dashboard({
 		}
 	}
 
-	const myLoc =
-		myPresence.syncStatus === "latest" || myPresence.syncStatus === "stale"
-			? myPresence.state
-			: null;
+	const myLoc = myPresence.state;
 
 	return (
 		<Container size="lg" mt="md">
@@ -211,7 +203,7 @@ function LocationGrid({
 	sharedPresenceShardIds,
 	onCellClick,
 }: {
-	myLoc: LocationState | null;
+	myLoc: LocationState;
 	sharedPresenceShardIds: string[];
 	onCellClick: (x: number, y: number) => void;
 }) {
@@ -229,7 +221,7 @@ function LocationGrid({
 				{Array.from({ length: GRID_SIZE * GRID_SIZE }, (_, i) => {
 					const x = i % GRID_SIZE;
 					const y = Math.floor(i / GRID_SIZE);
-					const isMe = myLoc?.x === x && myLoc?.y === y;
+					const isMe = myLoc.x === x && myLoc.y === y;
 					return (
 						<Button
 							key={`${String(x)}-${String(y)}`}
