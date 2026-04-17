@@ -19,20 +19,28 @@ export interface RejectionError<TCode extends string = string> {
 	readonly message: string;
 }
 
-/** Submit result — discriminated union, never throws */
+/**
+ * Submit result — discriminated union, never throws.
+ *
+ * `ok` is true only when the server acknowledged the operation. Consumers
+ * that don't care which failure happened can branch on `!result.ok`;
+ * consumers that do can still switch on `status`.
+ */
 export type SubmitResult<
 	TConsumerErrors extends string = string,
 	TFreshState = unknown,
 > =
-	| { readonly status: "acknowledged" }
+	| { readonly ok: true; readonly status: "acknowledged" }
 	| {
+			readonly ok: false;
 			readonly status: "rejected";
 			readonly error: RejectionError<TConsumerErrors | EngineErrorCode>;
 			readonly freshState?: TFreshState;
 	  }
 	| {
+			readonly ok: false;
 			readonly status: "blocked";
 			readonly error: RejectionError<BlockedCode>;
 	  }
-	| { readonly status: "timeout" }
-	| { readonly status: "disconnected" };
+	| { readonly ok: false; readonly status: "timeout" }
+	| { readonly ok: false; readonly status: "disconnected" };

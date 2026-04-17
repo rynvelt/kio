@@ -23,22 +23,7 @@ export function App() {
 	async function handleSubmit(op: "increment" | "decrement" | "reset") {
 		setError(null);
 		const result = await submit(op, {});
-		switch (result.status) {
-			case "acknowledged":
-				break;
-			case "rejected":
-				setError(`Rejected: ${result.error.message}`);
-				break;
-			case "timeout":
-				setError("Request timed out");
-				break;
-			case "disconnected":
-				setError("Disconnected from server");
-				break;
-			case "blocked":
-				setError("Operation pending — try again");
-				break;
-		}
+		if (!result.ok) setError(`Submit failed: ${result.status}`);
 	}
 
 	return (

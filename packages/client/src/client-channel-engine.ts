@@ -112,7 +112,7 @@ export class ClientChannelEngine {
 		if (message.type === "acknowledge") {
 			this.pendingSubmits.delete(message.opId);
 			this.clearInFlightForOp(message.opId);
-			pending.resolve({ status: "acknowledged" });
+			pending.resolve({ ok: true, status: "acknowledged" });
 			return;
 		}
 
@@ -138,6 +138,7 @@ export class ClientChannelEngine {
 		this.pendingSubmits.delete(message.opId);
 		this.clearInFlightForOp(message.opId);
 		pending.resolve({
+			ok: false,
 			status: "rejected",
 			error: { code: message.code, message: message.message },
 		});
@@ -148,7 +149,7 @@ export class ClientChannelEngine {
 		for (const [opId, pending] of this.pendingSubmits) {
 			this.clearTimer(opId);
 			this.clearInFlightForOp(opId);
-			pending.resolve({ status: "disconnected" });
+			pending.resolve({ ok: false, status: "disconnected" });
 		}
 		this.pendingSubmits.clear();
 	}
@@ -281,6 +282,7 @@ export class ClientChannelEngine {
 
 		if (store.hasInFlight) {
 			return {
+				ok: false,
 				status: "blocked",
 				error: {
 					code: "PENDING_OPERATION",
@@ -424,7 +426,7 @@ export class ClientChannelEngine {
 			if (pending) {
 				this.pendingSubmits.delete(opId);
 				this.clearInFlightForOp(opId);
-				pending.resolve({ status: "timeout" });
+				pending.resolve({ ok: false, status: "timeout" });
 			}
 		}, this.submitTimeoutMs);
 		this.timeouts.set(opId, timer);
