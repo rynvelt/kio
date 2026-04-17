@@ -1,0 +1,29 @@
+coverage:
+  status:
+    project:
+      default:
+        target: 70%
+        threshold: 0%
+    patch:
+      default:
+        target: 70%
+        threshold: 0%
+
+ignore:
+  - "packages/**/src/generated/**"
+  - "packages/adapter-prisma/**"
+  - "packages/e2e-tests/**"
+  - "packages/**/*.test.ts"
+  - "packages/**/*.check.ts"
+  - "packages/shared/src/test.ts"
+  - "packages/shared/src/test-helpers.ts"
+  - "packages/shared/src/typed-test-client.ts"
+  - "packages/shared/src/direct-transport.ts"
+  - "examples/**"
+  - "apps/**"
+  - "**/dist/**"
+
+comment:
+  layout: "diff, flags, files"
+  behavior: default
+  require_changes: false

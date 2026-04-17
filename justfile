@@ -32,6 +32,10 @@ fix:
 test:
     @bun test
 
+# Run tests with coverage — emits coverage/lcov.info for Codecov
+coverage:
+    @bun test --coverage --coverage-reporter=lcov --coverage-dir=./coverage
+
 # Start docs dev server
 docs-dev:
     @cd {{root_dir}}/apps/kio-docs && bunx astro dev

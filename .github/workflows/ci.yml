@@ -30,8 +30,15 @@ jobs:
       - name: Lint + format check
         run: just check
 
-      - name: Test
-        run: just test
+      - name: Test with coverage
+        run: just coverage
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5.5.4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage/lcov.info
+          fail_ci_if_error: true
 
       - name: Build
         run: just build
