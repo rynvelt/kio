@@ -65,16 +65,39 @@ export interface DeduplicationTracker {
 	add(opId: string): void;
 }
 
-/** In-memory deduplication tracker */
+/**
+ * In-memory deduplication tracker with a bounded capacity.
+ *
+ * Retains the last `capacity` opIds (FIFO eviction). Once the set is full,
+ * adding a new opId drops the oldest. Capacity must exceed the largest
+ * expected duplicate-retry window; callers that need different semantics
+ * (TTL, persistence, sharing across processes) can implement their own
+ * `DeduplicationTracker`.
+ */
 export class MemoryDeduplicationTracker implements DeduplicationTracker {
 	private readonly seen = new Set<string>();
+
+	constructor(private readonly capacity: number = 10_000) {
+		if (capacity <= 0) {
+			throw new Error("MemoryDeduplicationTracker capacity must be positive");
+		}
+	}
 
 	has(opId: string): boolean {
 		return this.seen.has(opId);
 	}
 
 	add(opId: string): void {
+		if (this.seen.has(opId)) return;
+		if (this.seen.size >= this.capacity) {
+			const oldest = this.seen.values().next().value;
+			if (oldest !== undefined) this.seen.delete(oldest);
+		}
 		this.seen.add(opId);
+	}
+
+	get size(): number {
+		return this.seen.size;
 	}
 }
 

@@ -362,6 +362,34 @@ describe("OperationPipeline", () => {
 				expect(second.code).toBe("DUPLICATE_OPERATION");
 			}
 		});
+
+		test("tracker evicts oldest opIds once capacity is reached", () => {
+			const dedup = new MemoryDeduplicationTracker(3);
+
+			dedup.add("op-1");
+			dedup.add("op-2");
+			dedup.add("op-3");
+			expect(dedup.size).toBe(3);
+			expect(dedup.has("op-1")).toBe(true);
+
+			dedup.add("op-4");
+			expect(dedup.size).toBe(3);
+			// Oldest fell out, others remain
+			expect(dedup.has("op-1")).toBe(false);
+			expect(dedup.has("op-2")).toBe(true);
+			expect(dedup.has("op-3")).toBe(true);
+			expect(dedup.has("op-4")).toBe(true);
+
+			// Re-adding an existing opId must not evict anything
+			dedup.add("op-3");
+			expect(dedup.size).toBe(3);
+			expect(dedup.has("op-2")).toBe(true);
+		});
+
+		test("tracker rejects non-positive capacity", () => {
+			expect(() => new MemoryDeduplicationTracker(0)).toThrow();
+			expect(() => new MemoryDeduplicationTracker(-1)).toThrow();
+		});
 	});
 
 	describe("version conflicts", () => {

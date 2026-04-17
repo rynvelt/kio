@@ -253,6 +253,39 @@ describe("ShardStateManager", () => {
 			expect(cached?.version).toBe(1);
 		});
 
+		test("multi shard CAS failure refreshes cache for failed shard", async () => {
+			const { manager, adapter } = createManager([["seat", "perResource"]]);
+			await adapter.compareAndSwap("game", "seat:1", 0, { items: ["sword"] });
+			await adapter.compareAndSwap("game", "seat:2", 0, { items: [] });
+
+			const shards = await manager.loadShards([
+				shard.ref("seat", "1"),
+				shard.ref("seat", "2"),
+			]);
+
+			// Someone else bumps seat:2 so our CAS will fail on it
+			await adapter.compareAndSwap("game", "seat:2", 1, {
+				items: ["shield"],
+			});
+
+			const newRoot = {
+				"seat:1": { items: [] },
+				"seat:2": { items: ["sword"] },
+			};
+
+			const result = await manager.persist(shards, newRoot);
+			expect(result.success).toBe(false);
+			if (!result.success) {
+				expect(result.failedShardId).toBe("seat:2");
+			}
+
+			// Cache for the conflicting shard must now hold fresh state so the
+			// next loadShards call returns the truth, not the stale attempted value.
+			const cached = manager.getCached("seat:2");
+			expect(cached?.state).toEqual({ items: ["shield"] });
+			expect(cached?.version).toBe(2);
+		});
+
 		test("multi shard CAS succeeds", async () => {
 			const { manager, adapter } = createManager([["seat", "perResource"]]);
 			await adapter.compareAndSwap("game", "seat:1", 0, {

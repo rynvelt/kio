@@ -207,6 +207,10 @@ export class ShardStateManager {
 		const result = await this.adapter.compareAndSwapMulti(operations);
 
 		if (!result.success) {
+			this.cache.set(result.failedShardId, {
+				state: result.currentState,
+				version: result.currentVersion,
+			});
 			return { success: false, failedShardId: result.failedShardId };
 		}
 
