@@ -186,4 +186,60 @@ describe("subscriptions e2e", () => {
 			).turn,
 		).toBe(1);
 	});
+
+	test("client.mySubscriptions() returns the actor's ref set and updates on grant/revoke", async () => {
+		const { server, client } = await setup({
+			defaultSubs: () => [{ channelId: "game", shardId: "world" }],
+		});
+
+		// Narrowed shape: state.refs is typed as readonly SubscriptionRef[].
+		// A miscast in readMySubsSnapshot would manifest here at runtime.
+		const initial = client.mySubscriptions();
+		expect(initial.syncStatus).toBe("latest");
+		if (initial.syncStatus === "latest" || initial.syncStatus === "stale") {
+			expect(initial.state.refs).toEqual([
+				{ channelId: "game", shardId: "world" },
+			]);
+		}
+
+		// subscribeToMySubscriptions fires on shard changes
+		let notifyCount = 0;
+		const unsubscribe = client.subscribeToMySubscriptions(() => {
+			notifyCount++;
+		});
+
+		await server.grantSubscription("alice", {
+			channelId: "game",
+			shardId: "room:lobby",
+		});
+		await new Promise((r) => setTimeout(r, 10));
+
+		expect(notifyCount).toBeGreaterThan(0);
+		const afterGrant = client.mySubscriptions();
+		if (
+			afterGrant.syncStatus === "latest" ||
+			afterGrant.syncStatus === "stale"
+		) {
+			const shardIds = afterGrant.state.refs.map((r) => r.shardId).sort();
+			expect(shardIds).toEqual(["room:lobby", "world"]);
+		}
+
+		await server.revokeSubscription("alice", {
+			channelId: "game",
+			shardId: "room:lobby",
+		});
+		await new Promise((r) => setTimeout(r, 10));
+
+		const afterRevoke = client.mySubscriptions();
+		if (
+			afterRevoke.syncStatus === "latest" ||
+			afterRevoke.syncStatus === "stale"
+		) {
+			expect(afterRevoke.state.refs).toEqual([
+				{ channelId: "game", shardId: "world" },
+			]);
+		}
+
+		unsubscribe();
+	});
 });

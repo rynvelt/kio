@@ -5,6 +5,7 @@ import type {
 	EngineBuilder,
 	ServerTransport,
 	Subscriber,
+	SubscriptionRef,
 	SubscriptionsConfig,
 	TypedSubscriptionRef,
 } from "@kiojs/shared";
@@ -460,11 +461,9 @@ export function createServer<
 			SUBSCRIPTIONS_CHANNEL_NAME,
 			"grant",
 			async ({ input }) => {
-				const typed = input as {
-					actorId: string;
-					ref: { channelId: string; shardId: string };
-				};
-				await syncer.onGrant(typed);
+				await syncer.onGrant(
+					input as { actorId: string; ref: SubscriptionRef },
+				);
 			},
 		);
 
@@ -472,11 +471,7 @@ export function createServer<
 			SUBSCRIPTIONS_CHANNEL_NAME,
 			"revoke",
 			({ input }) => {
-				const typed = input as {
-					actorId: string;
-					ref: { channelId: string; shardId: string };
-				};
-				syncer.onRevoke(typed);
+				syncer.onRevoke(input as { actorId: string; ref: SubscriptionRef });
 			},
 		);
 	}

@@ -215,14 +215,28 @@ export function createClient<
 	// isn't known yet. Flushed in the welcome handler once setActor has run.
 	const pendingMySubs: Array<() => void> = [];
 
+	/**
+	 * Read the actor's own subscription shard and narrow the snapshot's
+	 * state type from the engine's generic `Record<string, unknown>` to
+	 * the known `SubscriptionShardState`. The subscriptions channel's
+	 * state shape is defined by the built-in schema — the untyped
+	 * engine-level accessor is the only reason the cast is needed.
+	 */
+	function readMySubsSnapshot(
+		subsEng: ClientChannelEngine,
+		actorId: string,
+	): ShardState<SubscriptionShardState> {
+		return subsEng.shardState(
+			`subscription:${actorId}`,
+		) as ShardState<SubscriptionShardState>;
+	}
+
 	function mySubscriptions(): ShardState<SubscriptionShardState> {
 		const subsEng = engines.get(SUBSCRIPTIONS_CHANNEL_NAME);
 		if (!subsEng) return MY_SUBS_LOADING;
 		const actorId = subsEng.getActorId();
 		if (!actorId) return MY_SUBS_LOADING;
-		return subsEng.shardState(
-			`subscription:${actorId}`,
-		) as ShardState<SubscriptionShardState>;
+		return readMySubsSnapshot(subsEng, actorId);
 	}
 
 	function subscribeToMySubscriptions(listener: () => void): () => void {
@@ -273,12 +287,11 @@ export function createClient<
 		watcherInstalled = true;
 
 		subsEng.subscribeToShard(`subscription:${actorId}`, () => {
-			const snapshot = subsEng.shardState(`subscription:${actorId}`);
+			const snapshot = readMySubsSnapshot(subsEng, actorId);
 			if (snapshot.syncStatus !== "latest" && snapshot.syncStatus !== "stale") {
 				return;
 			}
-			const currentRefs = (snapshot.state as unknown as SubscriptionShardState)
-				.refs;
+			const currentRefs = snapshot.state.refs;
 
 			for (const prev of watcherPreviousRefs) {
 				const stillPresent = currentRefs.some(

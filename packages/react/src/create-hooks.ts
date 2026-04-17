@@ -1,4 +1,4 @@
-import type { Client, ClientSubscriptionMethods } from "@kiojs/client";
+import type { ClientSubscriptionMethods } from "@kiojs/client";
 import type {
 	BaseActor,
 	ChannelBuilder,
@@ -197,7 +197,7 @@ export function createKioHooks<
 		arg3?: string | ShardStateOptions<Record<string, unknown>>,
 		arg4?: ShardStateOptions<Record<string, unknown>>,
 	): ShardState<Record<string, unknown>, Record<string, unknown> | null> {
-		const client = useKioClientInternal() as Client<TChannels>;
+		const client = useKioClientInternal();
 
 		const resourceId = typeof arg3 === "string" ? arg3 : undefined;
 		const opts = typeof arg3 === "object" ? arg3 : arg4;
@@ -208,9 +208,7 @@ export function createKioHooks<
 				? `${shardTypeOrId}:${resourceId}`
 				: shardTypeOrId;
 
-		const ch = (client as Client<Record<string, never>>).channel(
-			channelName as never,
-		);
+		const ch = client.channel(channelName);
 
 		const subscribe = useCallback(
 			(onStoreChange: () => void) =>
@@ -243,12 +241,12 @@ export function createKioHooks<
 		operationName: OpName,
 		input: OperationInput<TChannels[CName], OpName>,
 	) => Promise<SubmitResult> {
-		const client = useKioClientInternal() as Client<TChannels>;
+		const client = useKioClientInternal();
 
 		return useCallback(
 			(operationName: string, input: unknown) =>
-				(client as Client<Record<string, never>>)
-					.channel(channelName as never)
+				client
+					.channel(channelName)
 					.submit(operationName as never, input as never),
 			[client, channelName],
 		) as never;

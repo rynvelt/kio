@@ -1,7 +1,20 @@
 import { describe, expect, test } from "bun:test";
 import { type ShardDefinition, shard } from "@kiojs/shared";
+import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { MemoryStateAdapter, type StateAdapter } from "./persistence";
 import { ShardStateManager } from "./shard-state-manager";
+
+/**
+ * Minimal StandardSchema stub — shard defs require a schema, but these
+ * tests never invoke validation, so a pass-through shim is sufficient.
+ */
+const stubSchema: StandardSchemaV1 = {
+	"~standard": {
+		version: 1,
+		vendor: "test",
+		validate: (value) => ({ value }),
+	},
+};
 
 function createManager(
 	shardDefs: Array<
@@ -19,8 +32,7 @@ function createManager(
 			{
 				name: entry[0],
 				kind: entry[1],
-				// biome-ignore lint/suspicious/noExplicitAny: test helper
-				schema: {} as any,
+				schema: stubSchema,
 				defaultState: entry[2],
 			},
 		]),
@@ -373,8 +385,7 @@ describe("ShardStateManager", () => {
 						{
 							name: "seat",
 							kind: "perResource" as const,
-							// biome-ignore lint/suspicious/noExplicitAny: test helper
-							schema: {} as any,
+							schema: stubSchema,
 							defaultState: undefined,
 						},
 					],
