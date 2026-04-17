@@ -824,8 +824,9 @@ function _clientSubscriptionHelperTypes() {
 
 function _serverSubscriptionHelperTypes() {
 	// Positive: engine with subscriptions config → Server has the helpers.
+	// Registers `gameChannel` so the ref literals hit real channels/shards.
 	const serverWithSubs = createServer(
-		engine({ subscriptions: { kind: "ephemeral" } }),
+		engine({ subscriptions: { kind: "ephemeral" } }).register(gameChannel),
 		{ persistence: new MemoryStateAdapter() },
 	);
 	serverWithSubs.grantSubscription("bob", {
@@ -835,6 +836,28 @@ function _serverSubscriptionHelperTypes() {
 	serverWithSubs.revokeSubscription("bob", {
 		channelId: "game",
 		shardId: "world",
+	});
+
+	// Per-resource refs must carry the shardType prefix.
+	serverWithSubs.grantSubscription("bob", {
+		channelId: "game",
+		shardId: "seat:alice",
+	});
+
+	serverWithSubs.grantSubscription("bob", {
+		// @ts-expect-error: "rooms" is not a registered channel
+		channelId: "rooms",
+		shardId: "world",
+	});
+	serverWithSubs.grantSubscription("bob", {
+		channelId: "game",
+		// @ts-expect-error: "players" is not a shard on "game"
+		shardId: "players",
+	});
+	serverWithSubs.grantSubscription("bob", {
+		channelId: "game",
+		// @ts-expect-error: per-resource "seat" requires "seat:" prefix, not "player:"
+		shardId: "player:alice",
 	});
 
 	// Negative: engine without subscriptions config → methods don't exist.

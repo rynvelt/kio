@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createClient } from "@kio/client";
 import { createServer, MemoryStateAdapter } from "@kio/server";
-import { channel, engine, shard } from "@kio/shared";
+import { channel, engine, shard, type TypedSubscriptionRef } from "@kio/shared";
 import { createDirectTransport } from "@kio/shared/test";
 import * as v from "valibot";
 
@@ -38,11 +38,11 @@ const clientEngine = engine({
 	subscriptions: { kind: "ephemeral" },
 }).register(gameChannel);
 
+type ServerChannels = { game: typeof gameChannel };
+type ServerSubRef = TypedSubscriptionRef<ServerChannels>;
+
 async function setup(opts: {
-	defaultSubs?: (actor: { actorId: string }) => ReadonlyArray<{
-		channelId: string;
-		shardId: string;
-	}>;
+	defaultSubs?: (actor: { actorId: string }) => readonly ServerSubRef[];
 	actorId?: string;
 }) {
 	const adapter = new MemoryStateAdapter();

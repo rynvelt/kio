@@ -53,6 +53,7 @@ export type {
 	SubscriptionRef,
 	SubscriptionShardState,
 	SubscriptionsChannel,
+	TypedSubscriptionRef,
 } from "./subscriptions";
 export {
 	createSubscriptionsChannel,

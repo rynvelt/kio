@@ -2,6 +2,45 @@ import * as v from "valibot";
 import { type ChannelBuilder, createChannelBuilder } from "./channel";
 import { shard } from "./shard";
 
+// ── TypedSubscriptionRef ───────────────────────────────────────────────
+
+/** Extract ShardDefs from a ChannelBuilder */
+type ExtractShardDefs<Ch> =
+	Ch extends ChannelBuilder<infer _K, infer _N, infer D, infer _O, infer _A>
+		? D
+		: never;
+
+/**
+ * Valid `shardId` strings for a channel:
+ * - singletons: the bare shard name.
+ * - per-resource: `${shardType}:${resourceId}` where the prefix is fixed
+ *   by the schema and the suffix is any string.
+ */
+type ShardIdsOf<Ch> =
+	| (keyof ExtractShardDefs<Ch>["singletons"] & string)
+	| {
+			[K in keyof ExtractShardDefs<Ch>["perResource"] &
+				string]: `${K}:${string}`;
+	  }[keyof ExtractShardDefs<Ch>["perResource"] & string];
+
+/**
+ * Narrowed {@link SubscriptionRef} for APIs that know which engine is in
+ * play. Distributed union keyed on `channelId` — once the caller writes
+ * `channelId: "presence"`, TypeScript narrows `shardId` to that channel's
+ * allowed forms (singleton names and per-resource prefixes). Consumers
+ * that hand-construct `{ channelId, shardId }` literals at call sites
+ * get typos caught at compile time without any helper factory.
+ *
+ * Structurally assignable to {@link SubscriptionRef}, so internal
+ * plumbing can treat the two interchangeably.
+ */
+export type TypedSubscriptionRef<TChannels> = {
+	[C in keyof TChannels & string]: {
+		readonly channelId: C;
+		readonly shardId: ShardIdsOf<TChannels[C]>;
+	};
+}[keyof TChannels & string];
+
 /** The fixed channel name used for the engine-managed subscriptions channel. */
 export const SUBSCRIPTIONS_CHANNEL_NAME = "subscriptions" as const;
 

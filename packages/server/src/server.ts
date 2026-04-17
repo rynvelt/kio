@@ -5,8 +5,8 @@ import type {
 	EngineBuilder,
 	ServerTransport,
 	Subscriber,
-	SubscriptionRef,
 	SubscriptionsConfig,
+	TypedSubscriptionRef,
 } from "@kio/shared";
 import {
 	createSubscriptionsChannel,
@@ -45,31 +45,38 @@ interface BaseServerConfig<TActor extends BaseActor> {
 }
 
 /** Config fields only valid when the engine has subscriptions enabled. */
-interface SubscriptionsServerConfig<TActor extends BaseActor> {
+interface SubscriptionsServerConfig<
+	TChannels extends object,
+	TActor extends BaseActor,
+> {
 	/**
 	 * Seed refs for a brand-new actor's subscription shard. Called once per
 	 * actor, on their first-ever connect (when `subscription:{actorId}` has
 	 * version 0). Subsequent connects read the shard directly; revokes
 	 * persist. Only valid when the engine has `subscriptions: { kind }` set.
 	 */
-	readonly defaultSubscriptions?: (actor: TActor) => readonly SubscriptionRef[];
+	readonly defaultSubscriptions?: (
+		actor: TActor,
+	) => readonly TypedSubscriptionRef<TChannels>[];
 }
 
 // biome-ignore lint/complexity/noBannedTypes: empty intersection neutral element
 type EmptyConfig = {};
 
 /**
- * Configuration for createServer. `TActor` is inferred from the engine
- * builder; `TSubs` gates subscription-specific fields like
- * `defaultSubscriptions` — they only exist on the config type when the
- * engine opted into subscriptions.
+ * Configuration for createServer. `TChannels` is inferred from the engine
+ * builder and drives the shape of typed subscription refs; `TActor` feeds
+ * hooks that see the actor; `TSubs` gates subscription-specific fields
+ * like `defaultSubscriptions` — they only exist on the config type when
+ * the engine opted into subscriptions.
  */
 export type ServerConfig<
+	TChannels extends object = object,
 	TActor extends BaseActor = BaseActor,
 	TSubs extends SubscriptionsConfig | undefined = undefined,
 > = BaseServerConfig<TActor> &
 	(TSubs extends SubscriptionsConfig
-		? SubscriptionsServerConfig<TActor>
+		? SubscriptionsServerConfig<TChannels, TActor>
 		: EmptyConfig);
 
 /** Extract operation names from a ChannelBuilder's Ops type */
@@ -94,7 +101,7 @@ type OperationInput<Ch, OpName extends string> =
  * Thin wrappers over `server.submit("subscriptions", ...)` so consumers
  * never see the channel name, operation name, or shard wire format.
  */
-export interface SubscriptionMethods {
+export interface SubscriptionMethods<TChannels extends object = object> {
 	/**
 	 * Grant an actor permission to subscribe to a shard. Idempotent —
 	 * granting the same ref twice is a no-op (doesn't rev the shard's
@@ -104,7 +111,7 @@ export interface SubscriptionMethods {
 	 */
 	grantSubscription(
 		actorId: string,
-		ref: SubscriptionRef,
+		ref: TypedSubscriptionRef<TChannels>,
 	): Promise<PipelineResult>;
 
 	/**
@@ -113,7 +120,7 @@ export interface SubscriptionMethods {
 	 */
 	revokeSubscription(
 		actorId: string,
-		ref: SubscriptionRef,
+		ref: TypedSubscriptionRef<TChannels>,
 	): Promise<PipelineResult>;
 }
 
@@ -126,8 +133,12 @@ type EmptyMethods = {};
  * Calling `grantSubscription` on a server whose engine didn't opt in is a
  * compile-time error.
  */
-export type ConditionalSubscriptionMethods<TSubs> =
-	TSubs extends SubscriptionsConfig ? SubscriptionMethods : EmptyMethods;
+export type ConditionalSubscriptionMethods<
+	TChannels extends object,
+	TSubs,
+> = TSubs extends SubscriptionsConfig
+	? SubscriptionMethods<TChannels>
+	: EmptyMethods;
 
 /** Typed server instance — channel names, operation names, and inputs are enforced */
 export interface Server<TChannels extends object = object> {
@@ -227,8 +238,8 @@ export function createServer<
 	TSubs extends SubscriptionsConfig | undefined = undefined,
 >(
 	engineBuilder: EngineBuilder<TChannels, TActor, TSubs>,
-	config: ServerConfig<TActor, TSubs>,
-): Server<TChannels> & ConditionalSubscriptionMethods<TSubs> {
+	config: ServerConfig<TChannels, TActor, TSubs>,
+): Server<TChannels> & ConditionalSubscriptionMethods<TChannels, TSubs> {
 	const channels = new Map<string, ChannelRuntime>();
 	const { transport, onEvent } = config;
 	const serverActor: BaseActor =
@@ -349,7 +360,7 @@ export function createServer<
 	// callback and has no knowledge of subscriptions.
 	const subsConfigForResolver = engineBuilder["~subscriptions"];
 	const configWithSubs = config as BaseServerConfig<TActor> &
-		Partial<SubscriptionsServerConfig<TActor>>;
+		Partial<SubscriptionsServerConfig<TChannels, TActor>>;
 	const subscriptionResolver = new SubscriptionResolver<TActor>({
 		subsChannel: subsConfigForResolver
 			? channels.get(SUBSCRIPTIONS_CHANNEL_NAME)
@@ -533,7 +544,7 @@ export function createServer<
 	// call them by accident, and devtools show only the keys that actually work.
 	const subsEnabled = engineBuilder["~subscriptions"];
 	if (subsEnabled) {
-		const methods: SubscriptionMethods = {
+		const methods: SubscriptionMethods<TChannels> = {
 			grantSubscription(actorId, ref) {
 				return internalSubmit(
 					SUBSCRIPTIONS_CHANNEL_NAME,
@@ -558,5 +569,6 @@ export function createServer<
 		Object.assign(base, methods);
 	}
 
-	return base as Server<TChannels> & ConditionalSubscriptionMethods<TSubs>;
+	return base as Server<TChannels> &
+		ConditionalSubscriptionMethods<TChannels, TSubs>;
 }

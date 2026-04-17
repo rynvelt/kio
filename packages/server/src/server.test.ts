@@ -740,8 +740,21 @@ describe("createServer", () => {
 			);
 		});
 
+		const gameChannel = channel
+			.durable("game")
+			.shard("world", v.object({ turn: v.number() }));
+		const presenceChannel = channel
+			.ephemeral("presence")
+			.shardPerResource("player", v.object({ name: v.string() }));
+
+		function makeGrantRevokeEngine() {
+			return engine({ subscriptions: { kind: "ephemeral" } })
+				.register(gameChannel)
+				.register(presenceChannel);
+		}
+
 		test("grantSubscription adds the ref to the actor's subscription shard", async () => {
-			const appEngine = engine({ subscriptions: { kind: "ephemeral" } });
+			const appEngine = makeGrantRevokeEngine();
 			const server = createServer(appEngine, {
 				persistence: new MemoryStateAdapter(),
 			});
@@ -760,11 +773,11 @@ describe("createServer", () => {
 		});
 
 		test("grantSubscription is idempotent", async () => {
-			const appEngine = engine({ subscriptions: { kind: "ephemeral" } });
+			const appEngine = makeGrantRevokeEngine();
 			const server = createServer(appEngine, {
 				persistence: new MemoryStateAdapter(),
 			});
-			const ref = { channelId: "game", shardId: "world" };
+			const ref = { channelId: "game", shardId: "world" } as const;
 
 			await server.grantSubscription("bob", ref);
 			await server.grantSubscription("bob", ref);
@@ -777,12 +790,15 @@ describe("createServer", () => {
 		});
 
 		test("revokeSubscription removes an existing ref", async () => {
-			const appEngine = engine({ subscriptions: { kind: "ephemeral" } });
+			const appEngine = makeGrantRevokeEngine();
 			const server = createServer(appEngine, {
 				persistence: new MemoryStateAdapter(),
 			});
-			const refA = { channelId: "game", shardId: "world" };
-			const refB = { channelId: "presence", shardId: "player:alice" };
+			const refA = { channelId: "game", shardId: "world" } as const;
+			const refB = {
+				channelId: "presence",
+				shardId: "player:alice",
+			} as const;
 
 			await server.grantSubscription("bob", refA);
 			await server.grantSubscription("bob", refB);
