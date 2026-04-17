@@ -299,13 +299,15 @@ export function createServer<
 		afterCommitHooks
 			.run(channelName, result, actor, input, depth, boundSubmit)
 			.catch((err) => {
-				// Operator safety net — hooks are fire-and-forget, so without this a
-				// silently-broken hook would also be silently-invisible if the
-				// consumer hasn't wired up onEvent.
-				console.error(
-					`[kio] afterCommit error in ${channelName}.${result.operationName}:`,
-					err,
-				);
+				// Safety net only when the consumer hasn't wired onEvent — hooks
+				// are fire-and-forget, so a silently-broken hook would otherwise be
+				// invisible. Consumers who provide onEvent own their observability.
+				if (!onEvent) {
+					console.error(
+						`[kio] afterCommit error in ${channelName}.${result.operationName}:`,
+						err,
+					);
+				}
 				safeEmit(onEvent, {
 					type: "hook.failed",
 					timestamp: Date.now(),
