@@ -4,8 +4,6 @@ import { appEngine } from "./schema";
 
 async function main() {
 	const adapter = new MemoryStateAdapter();
-	await adapter.compareAndSwap("counter", "count", 0, { value: 0 });
-	await adapter.set("presence", "users", { connected: [] });
 
 	const { transport, websocket, upgrade } = createBunWsTransport();
 

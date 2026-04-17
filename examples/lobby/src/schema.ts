@@ -31,7 +31,9 @@ export type RoomState = v.InferOutput<typeof roomState>;
 
 export const lobbyChannel = kio.channel
 	.durable("lobby")
-	.shard("room", roomState)
+	.shard("room", roomState, {
+		defaultState: { phase: "waiting", countdownEndsAt: null, players: [] },
+	})
 	.operation("join", {
 		execution: "optimistic",
 		versionChecked: false,

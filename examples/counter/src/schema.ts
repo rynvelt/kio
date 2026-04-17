@@ -3,7 +3,9 @@ import * as v from "valibot";
 
 export const counterChannel = channel
 	.durable("counter")
-	.shard("count", v.object({ value: v.number() }))
+	.shard("count", v.object({ value: v.number() }), {
+		defaultState: { value: 0 },
+	})
 	.operation("increment", {
 		execution: "optimistic",
 		input: v.object({}),
@@ -36,6 +38,7 @@ export const presenceChannel = channel
 	.shard(
 		"users",
 		v.object({ connected: v.array(v.object({ id: v.string() })) }),
+		{ defaultState: { connected: [] } },
 	)
 	.operation("join", {
 		execution: "optimistic",

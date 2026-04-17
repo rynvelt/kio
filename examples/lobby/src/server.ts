@@ -8,13 +8,6 @@ const COUNTDOWN_SECONDS = 3;
 async function main() {
 	const adapter = new MemoryStateAdapter();
 
-	// Seed lobby room
-	await adapter.compareAndSwap("lobby", "room", 0, {
-		phase: "waiting",
-		countdownEndsAt: null,
-		players: [],
-	} satisfies RoomState);
-
 	const { transport, websocket, upgrade } = createBunWsTransport();
 
 	let countdownTimer: ReturnType<typeof setTimeout> | null = null;
