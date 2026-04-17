@@ -1,4 +1,4 @@
-import type { Client, ClientSubscriptionMethods } from "@kio/client";
+import type { Client, ClientSubscriptionMethods } from "@kiojs/client";
 import type {
 	BaseActor,
 	ChannelBuilder,
@@ -10,7 +10,7 @@ import type {
 	SubmitResult,
 	SubscriptionShardState,
 	SubscriptionsConfig,
-} from "@kio/shared";
+} from "@kiojs/shared";
 import { useCallback, useMemo, useSyncExternalStore } from "react";
 import { useKioClientInternal } from "./provider";
 

@@ -2,8 +2,8 @@ import type {
 	BaseActor,
 	SubscriptionRef,
 	SubscriptionShardState,
-} from "@kio/shared";
-import { SUBSCRIPTIONS_CHANNEL_NAME } from "@kio/shared";
+} from "@kiojs/shared";
+import { SUBSCRIPTIONS_CHANNEL_NAME } from "@kiojs/shared";
 import type { ChannelRuntime } from "./channel-runtime";
 import type { PipelineResult, Submission } from "./pipeline";
 

@@ -1,4 +1,4 @@
-import type { BaseActor } from "@kio/shared";
+import type { BaseActor } from "@kiojs/shared";
 
 /**
  * Structured observability events emitted by the server.

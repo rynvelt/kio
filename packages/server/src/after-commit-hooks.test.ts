@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { BaseActor } from "@kio/shared";
+import type { BaseActor } from "@kiojs/shared";
 import { AfterCommitHooks } from "./after-commit-hooks";
 import type { PipelineResult } from "./pipeline";
 import type { AfterCommitContext, AfterCommitSubmitFn } from "./server";

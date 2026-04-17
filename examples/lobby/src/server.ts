@@ -1,5 +1,5 @@
-import { createServer, MemoryStateAdapter } from "@kio/server";
-import { createBunWsTransport } from "@kio/transport-bun-ws";
+import { createServer, MemoryStateAdapter } from "@kiojs/server";
+import { createBunWsTransport } from "@kiojs/transport-bun-ws";
 import type { RoomState } from "./schema";
 import { appEngine } from "./schema";
 

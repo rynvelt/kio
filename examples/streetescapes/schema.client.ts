@@ -1,4 +1,4 @@
-import { engine } from "@kio/shared";
+import { engine } from "@kiojs/shared";
 import { fogChannel, gameChannel, presenceChannel } from "./schema";
 
 export const clientEngine = engine()

@@ -14,7 +14,7 @@ Not a communication library - wire protocols are the easy part. The value is in 
 
 ```ts
 // schema.ts
-import { channel, engine, shard } from "@kio/shared";
+import { channel, engine, shard } from "@kiojs/shared";
 import * as v from "valibot";
 
 export const counterChannel = channel
@@ -34,8 +34,8 @@ export const appEngine = engine().register(counterChannel);
 
 ```ts
 // server.ts
-import { createServer, MemoryStateAdapter } from "@kio/server";
-import { createBunWsTransport } from "@kio/transport-bun-ws";
+import { createServer, MemoryStateAdapter } from "@kiojs/server";
+import { createBunWsTransport } from "@kiojs/transport-bun-ws";
 import { appEngine } from "./schema";
 
 const adapter = new MemoryStateAdapter();
@@ -61,7 +61,7 @@ Bun.serve({
 
 ```tsx
 // App.tsx
-import { useKio, useShardState } from "@kio/react";
+import { useKio, useShardState } from "@kiojs/react";
 
 function Counter() {
   const kio = useKio();
@@ -123,14 +123,14 @@ Internally the server is composed from small pieces: `ChannelRuntime` (pipeline 
 
 | Package | Role |
 |---|---|
-| `@kio/shared` | Channel/operation builders, engine, transport types, shared utilities |
-| `@kio/server` | `createServer`, pipeline, broadcast, persistence interface, afterCommit hooks |
-| `@kio/client` | Client runtime, local state mirror, optimistic apply, subscription management |
-| `@kio/react` | `useKio`, `useShardState`, provider |
-| `@kio/transport-ws` | Generic WebSocket client transport |
-| `@kio/transport-bun-ws` | Bun-native server transport |
-| `@kio/adapter-prisma` | Persistence adapter for Prisma |
-| `@kio/e2e-tests` | End-to-end integration tests spanning client, server, transport |
+| `@kiojs/shared` | Channel/operation builders, engine, transport types, shared utilities |
+| `@kiojs/server` | `createServer`, pipeline, broadcast, persistence interface, afterCommit hooks |
+| `@kiojs/client` | Client runtime, local state mirror, optimistic apply, subscription management |
+| `@kiojs/react` | `useKio`, `useShardState`, provider |
+| `@kiojs/transport-ws` | Generic WebSocket client transport |
+| `@kiojs/transport-bun-ws` | Bun-native server transport |
+| `@kiojs/adapter-prisma` | Persistence adapter for Prisma |
+| `@kiojs/e2e-tests` | End-to-end integration tests spanning client, server, transport |
 
 ## Examples
 
@@ -160,7 +160,7 @@ See [`justfile`](./justfile) for the full list. Tests use `bun test`; the projec
 `StateAdapter` is the pluggable interface:
 
 - `MemoryStateAdapter` - reference implementation, in-process, no I/O. Good for tests and local development.
-- `@kio/adapter-prisma` - Postgres (or any Prisma-supported DB) via Prisma Client.
+- `@kiojs/adapter-prisma` - Postgres (or any Prisma-supported DB) via Prisma Client.
 
 A custom adapter implements `load`, `set`, `compareAndSwap`, and `compareAndSwapMulti`. Return result objects for version conflicts; throw for infrastructure errors. The engine catches thrown errors and maps them to `INTERNAL_ERROR` for clients.
 

@@ -1,5 +1,5 @@
-import { type Client, createClient } from "@kio/client";
-import { createWsTransport } from "@kio/transport-ws";
+import { type Client, createClient } from "@kiojs/client";
+import { createWsTransport } from "@kiojs/transport-ws";
 import { getActorId } from "./identity";
 import { appEngine } from "./schema";
 

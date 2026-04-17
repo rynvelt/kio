@@ -1,4 +1,4 @@
-import { KioProvider } from "@kio/react";
+import { KioProvider } from "@kiojs/react";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";

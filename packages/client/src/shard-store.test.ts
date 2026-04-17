@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { ShardState } from "@kio/shared";
+import type { ShardState } from "@kiojs/shared";
 import { ShardStore } from "./shard-store";
 
 describe("ShardStore", () => {

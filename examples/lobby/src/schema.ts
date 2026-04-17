@@ -1,4 +1,4 @@
-import { engine, KIO_SERVER_ACTOR_ID } from "@kio/shared";
+import { engine, KIO_SERVER_ACTOR_ID } from "@kiojs/shared";
 import * as v from "valibot";
 
 const actorSchema = v.object({

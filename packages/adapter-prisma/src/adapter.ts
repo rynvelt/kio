@@ -3,7 +3,7 @@ import type {
 	CasResult,
 	PersistedShard,
 	StateAdapter,
-} from "@kio/server";
+} from "@kiojs/server";
 import type { PrismaClient } from "./generated/client";
 
 /** CAS failure info thrown inside transactions to trigger rollback */

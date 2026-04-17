@@ -4,7 +4,7 @@ import {
 	KIO_SERVER_ACTOR,
 	SUBSCRIPTIONS_CHANNEL_NAME,
 	type SubscriptionRef,
-} from "@kio/shared";
+} from "@kiojs/shared";
 import { ChannelRuntime } from "./channel-runtime";
 import { MemoryStateAdapter } from "./persistence";
 import type { Submission } from "./pipeline";

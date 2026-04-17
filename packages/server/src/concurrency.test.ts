@@ -5,7 +5,7 @@ import {
 	engine,
 	type Subscriber,
 	shard,
-} from "@kio/shared";
+} from "@kiojs/shared";
 import * as v from "valibot";
 import type { KioEvent } from "./events";
 import { MemoryStateAdapter } from "./persistence";

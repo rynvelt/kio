@@ -5,8 +5,11 @@ import {
 	engine,
 	type Subscriber,
 	shard,
-} from "@kio/shared";
-import { createDirectTransport, createTypedTestClient } from "@kio/shared/test";
+} from "@kiojs/shared";
+import {
+	createDirectTransport,
+	createTypedTestClient,
+} from "@kiojs/shared/test";
 import * as v from "valibot";
 import type { KioEvent } from "./events";
 import { MemoryStateAdapter } from "./persistence";

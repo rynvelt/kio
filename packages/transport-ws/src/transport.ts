@@ -1,4 +1,4 @@
-import type { ClientTransport } from "@kio/shared";
+import type { ClientTransport } from "@kiojs/shared";
 
 export interface WsTransportOptions {
 	/** Factory that creates a new WebSocket connection */

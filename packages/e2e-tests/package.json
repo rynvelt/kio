@@ -1,12 +1,12 @@
 {
-	"name": "@kio/e2e-tests",
+	"name": "@kiojs/e2e-tests",
 	"version": "0.0.1",
 	"private": true,
 	"type": "module",
 	"dependencies": {
-		"@kio/shared": "workspace:*",
-		"@kio/server": "workspace:*",
-		"@kio/client": "workspace:*",
+		"@kiojs/shared": "workspace:*",
+		"@kiojs/server": "workspace:*",
+		"@kiojs/client": "workspace:*",
 		"valibot": "^1.3.1"
 	}
 }

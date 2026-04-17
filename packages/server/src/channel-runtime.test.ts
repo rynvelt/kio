@@ -4,8 +4,8 @@ import {
 	channel,
 	type Subscriber,
 	shard,
-} from "@kio/shared";
-import { expectToBeDefined } from "@kio/shared/test";
+} from "@kiojs/shared";
+import { expectToBeDefined } from "@kiojs/shared/test";
 import * as v from "valibot";
 import { ChannelRuntime } from "./channel-runtime";
 import { MemoryStateAdapter } from "./persistence";

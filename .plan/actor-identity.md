@@ -10,10 +10,10 @@ The server auto-generates actorId from connectionId (`ws:0`, `ws:1`). Every reco
 
 ### defineApp()
 
-A new root-level factory in `@kio/shared` that captures the actor type once:
+A new root-level factory in `@kiojs/shared` that captures the actor type once:
 
 ```ts
-import { defineApp } from "@kio/shared";
+import { defineApp } from "@kiojs/shared";
 import * as v from "valibot";
 
 const kio = defineApp({

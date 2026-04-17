@@ -1,5 +1,5 @@
-import type { Client } from "@kio/client";
-import { KioProvider } from "@kio/react";
+import type { Client } from "@kiojs/client";
+import { KioProvider } from "@kiojs/react";
 import {
 	Alert,
 	Badge,

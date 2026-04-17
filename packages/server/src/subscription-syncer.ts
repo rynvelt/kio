@@ -1,4 +1,4 @@
-import type { BaseActor, SubscriptionRef } from "@kio/shared";
+import type { BaseActor, SubscriptionRef } from "@kiojs/shared";
 import type { ActorRegistry } from "./actor-registry";
 
 /**

@@ -9,7 +9,7 @@ sidebar:
 
 | Feature | Status | Notes |
 |---|---|---|
-| **Core types & builder** | Exploratory | Channel builder, shard refs, operation context types in `@kio/core` |
+| **Core types & builder** | Exploratory | Channel builder, shard refs, operation context types in `@kiojs/core` |
 | **Immer composed root** | Exploratory | PoC test passing for multi-shard apply |
 | **Three-file split** | Exploratory | StreetEscapes example exercising the API shape |
 | **Server engine pipeline** | Design Only | See [Phase 2 plan](https://github.com/...) |

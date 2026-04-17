@@ -1,4 +1,4 @@
-import { channel, shard } from "@kio/shared";
+import { channel, shard } from "@kiojs/shared";
 import * as v from "valibot";
 
 // ── State schemas ────────────────────────────────────────────────────

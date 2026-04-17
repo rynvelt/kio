@@ -8,7 +8,7 @@ import {
 	type ShardState,
 	type StateMessage,
 	type SubmitResult,
-} from "@kio/shared";
+} from "@kiojs/shared";
 import { produce } from "immer";
 import type { InFlight } from "./shard-store";
 import { ShardStore } from "./shard-store";

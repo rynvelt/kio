@@ -1,4 +1,4 @@
-import type { CausedBy, ChannelData, Subscriber } from "@kio/shared";
+import type { CausedBy, ChannelData, Subscriber } from "@kiojs/shared";
 import { BroadcastManager } from "./broadcast-manager";
 import type { EventEmitter } from "./events";
 import type { StateAdapter } from "./persistence";

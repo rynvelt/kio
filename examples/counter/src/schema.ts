@@ -1,4 +1,4 @@
-import { channel, engine, shard } from "@kio/shared";
+import { channel, engine, shard } from "@kiojs/shared";
 import * as v from "valibot";
 
 export const counterChannel = channel

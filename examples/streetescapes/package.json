@@ -1,10 +1,10 @@
 {
-	"name": "@kio/example-streetescapes",
+	"name": "@kiojs/example-streetescapes",
 	"version": "0.0.1",
 	"private": true,
 	"type": "module",
 	"dependencies": {
-		"@kio/shared": "workspace:*",
+		"@kiojs/shared": "workspace:*",
 		"valibot": "^1"
 	}
 }

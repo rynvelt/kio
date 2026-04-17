@@ -7,13 +7,13 @@ import type {
 	Subscriber,
 	SubscriptionsConfig,
 	TypedSubscriptionRef,
-} from "@kio/shared";
+} from "@kiojs/shared";
 import {
 	createSubscriptionsChannel,
 	jsonCodec,
 	KIO_SERVER_ACTOR,
 	SUBSCRIPTIONS_CHANNEL_NAME,
-} from "@kio/shared";
+} from "@kiojs/shared";
 import { ActorRegistry } from "./actor-registry";
 import { AfterCommitHooks } from "./after-commit-hooks";
 import { ChannelRuntime } from "./channel-runtime";

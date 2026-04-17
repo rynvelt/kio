@@ -3,9 +3,9 @@
  * These run as part of `just typecheck` (tsgo), not `bun test`.
  */
 
-import { createServer, MemoryStateAdapter } from "@kio/server";
-import type { ShardState, SubmitResult } from "@kio/shared";
-import { channel, engine, shard } from "@kio/shared";
+import { createServer, MemoryStateAdapter } from "@kiojs/server";
+import type { ShardState, SubmitResult } from "@kiojs/shared";
+import { channel, engine, shard } from "@kiojs/shared";
 import * as v from "valibot";
 
 // ── Type assertion helpers ───────────────────────────────────────────
@@ -571,7 +571,7 @@ _serverForTypes.submit("presence", "setOnline", {});
 
 // ── 27. engine(options) creates a pre-typed builder ─────────────────
 
-import type { InferActor } from "@kio/shared";
+import type { InferActor } from "@kiojs/shared";
 
 const kio = engine({
 	actor: v.object({ actorId: v.string(), name: v.string() }),
@@ -652,8 +652,8 @@ channel
 // actor carries. Conversely, a channel that demands fields the engine's
 // actor doesn't have is rejected at compile time via ChannelActorMismatch.
 
-import type { ChannelActorMismatch } from "@kio/shared";
-import { createChannelBuilder } from "@kio/shared";
+import type { ChannelActorMismatch } from "@kiojs/shared";
+import { createChannelBuilder } from "@kiojs/shared";
 
 // Positive: bare-`channel.durable(...)` channel (TActor = BaseActor)
 // can be registered on an engine with a richer actor type.
@@ -709,7 +709,7 @@ _mismatchResult.register(_kioChannel);
 // subscriptions channel (typed with BaseActor) works with a bare
 // `engine()` AND with an engine configured with a richer actor.
 
-import { createSubscriptionsChannel } from "@kio/shared";
+import { createSubscriptionsChannel } from "@kiojs/shared";
 
 const _subChannel = createSubscriptionsChannel({ kind: "ephemeral" });
 
@@ -741,7 +741,7 @@ _kioEngineWithSubs.register(_kioChannel);
 
 // ── 32. engine({ subscriptions }) carries TSubs for type inference ──
 
-import type { InferSubscriptions, SubscriptionsConfig } from "@kio/shared";
+import type { InferSubscriptions, SubscriptionsConfig } from "@kiojs/shared";
 
 // Bare engine — TSubs is undefined.
 const _e32a = engine();
@@ -788,8 +788,8 @@ const _cfg: SubscriptionsConfig = { kind: "ephemeral" };
 
 // ── 33b. Client.mySubscriptions / subscribeToMySubscriptions are conditional ──
 
-import { createClient } from "@kio/client";
-import { createDirectTransport } from "@kio/shared";
+import { createClient } from "@kiojs/client";
+import { createDirectTransport } from "@kiojs/shared";
 
 function _clientSubscriptionHelperTypes() {
 	const { client: transport } = createDirectTransport();

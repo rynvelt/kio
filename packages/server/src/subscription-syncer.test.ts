@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { channel, engine, type ServerMessage, shard } from "@kio/shared";
+import { channel, engine, type ServerMessage, shard } from "@kiojs/shared";
 import {
 	createDirectTransport,
 	createTypedTestClient,
 	expectToBeDefined,
-} from "@kio/shared/test";
+} from "@kiojs/shared/test";
 import * as v from "valibot";
 import { MemoryStateAdapter } from "./persistence";
 import { createServer } from "./server";

@@ -1,5 +1,5 @@
-import { createClient } from "@kio/client";
-import { createWsTransport } from "@kio/transport-ws";
+import { createClient } from "@kiojs/client";
+import { createWsTransport } from "@kiojs/transport-ws";
 import { appEngine } from "./schema";
 
 export function setupApp(name: string) {

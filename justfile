@@ -15,7 +15,7 @@ clean-ts:
 # Build all publishable packages (emits dist/ per package for npm consumers)
 build:
     @for pkg in shared client server react transport-ws transport-bun-ws; do \
-        echo "→ build @kio/$pkg"; \
+        echo "→ build @kiojs/$pkg"; \
         cd {{root_dir}}/packages/$pkg && rm -rf dist && bunx tsgo -p tsconfig.build.json || exit 1; \
     done
 

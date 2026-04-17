@@ -1,4 +1,4 @@
-import type { BroadcastShardEntry, CausedBy, Subscriber } from "@kio/shared";
+import type { BroadcastShardEntry, CausedBy, Subscriber } from "@kiojs/shared";
 import type { Patch } from "immer";
 import { type EventEmitter, safeEmit } from "./events";
 

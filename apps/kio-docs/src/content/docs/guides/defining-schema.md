@@ -6,7 +6,7 @@ sidebar:
 ---
 
 :::note[Status: Design Only]
-This guide describes the target API. The builder pattern is partially implemented in @kio/core.
+This guide describes the target API. The builder pattern is partially implemented in @kiojs/core.
 :::
 
 Your schema file is the shared contract between client and server. Both sides import it, so everything defined here must be safe to run in either environment. This is where you declare channels, shards, state shapes, and operations.

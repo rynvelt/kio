@@ -1,5 +1,5 @@
 {
-	"name": "@kio/shared",
+	"name": "@kiojs/shared",
 	"version": "0.1.0",
 	"description": "Shared types and builders for Kio — channels, operations, engine, transport contracts.",
 	"license": "MIT",

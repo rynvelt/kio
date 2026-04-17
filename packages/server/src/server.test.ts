@@ -7,12 +7,12 @@ import {
 	SUBSCRIPTIONS_CHANNEL_NAME,
 	type Subscriber,
 	shard,
-} from "@kio/shared";
+} from "@kiojs/shared";
 import {
 	createDirectTransport,
 	createTypedTestClient,
 	expectToBeDefined,
-} from "@kio/shared/test";
+} from "@kiojs/shared/test";
 import * as v from "valibot";
 import type { HookFailedEvent, KioEvent } from "./events";
 import { MemoryStateAdapter } from "./persistence";

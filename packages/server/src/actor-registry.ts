@@ -1,4 +1,4 @@
-import type { BaseActor } from "@kio/shared";
+import type { BaseActor } from "@kiojs/shared";
 import type { StandardSchemaV1 } from "@standard-schema/spec";
 
 /**

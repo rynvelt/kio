@@ -1,5 +1,5 @@
 {
-	"name": "@kio/adapter-prisma",
+	"name": "@kiojs/adapter-prisma",
 	"version": "0.0.1",
 	"private": true,
 	"type": "module",
@@ -14,7 +14,7 @@
 		"prisma:generate": "bunx prisma generate"
 	},
 	"dependencies": {
-		"@kio/server": "workspace:*",
+		"@kiojs/server": "workspace:*",
 		"@prisma/client": "7.6.0",
 		"@prisma/client-runtime-utils": "7.6.0"
 	},

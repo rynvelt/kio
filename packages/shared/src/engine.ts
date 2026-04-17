@@ -79,7 +79,7 @@ export interface EngineBuilder<
 	/** Channel builder factory, pre-typed with TActor. */
 	readonly channel: ChannelFactory<TActor>;
 
-	/** Shard ref helper — same as the bare `shard` export from `@kio/shared`. */
+	/** Shard ref helper — same as the bare `shard` export from `@kiojs/shared`. */
 	readonly shard: typeof shard;
 
 	/**

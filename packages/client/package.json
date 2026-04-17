@@ -1,5 +1,5 @@
 {
-	"name": "@kio/client",
+	"name": "@kiojs/client",
 	"version": "0.1.0",
 	"description": "Client runtime for Kio — local state mirror, optimistic apply, subscription management.",
 	"license": "MIT",
@@ -13,7 +13,13 @@
 	"bugs": {
 		"url": "https://github.com/rynvelt/kio/issues"
 	},
-	"keywords": ["kio", "realtime", "state-sync", "multiplayer", "client"],
+	"keywords": [
+		"kio",
+		"realtime",
+		"state-sync",
+		"multiplayer",
+		"client"
+	],
 	"type": "module",
 	"sideEffects": false,
 	"main": "./dist/index.js",
@@ -25,12 +31,16 @@
 			"default": "./dist/index.js"
 		}
 	},
-	"files": ["dist", "README.md", "LICENSE"],
+	"files": [
+		"dist",
+		"README.md",
+		"LICENSE"
+	],
 	"scripts": {
 		"build": "bunx tsgo -p tsconfig.build.json"
 	},
 	"dependencies": {
-		"@kio/shared": "workspace:*",
+		"@kiojs/shared": "workspace:*",
 		"@standard-schema/spec": "^1.1.0",
 		"immer": "^11.1.4",
 		"valibot": "^1.3.1"

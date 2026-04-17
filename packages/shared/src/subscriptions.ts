@@ -126,7 +126,7 @@ export interface CreateSubscriptionsChannelOptions {
  * Add to both the server-side and client-side engine:
  *
  * ```ts
- * import { createSubscriptionsChannel } from "@kio/shared"
+ * import { createSubscriptionsChannel } from "@kiojs/shared"
  * export const subscriptionsChannel = createSubscriptionsChannel({ kind: "ephemeral" })
  * ```
  */

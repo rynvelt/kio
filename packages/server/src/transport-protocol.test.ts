@@ -4,13 +4,13 @@ import {
 	channel,
 	type ServerMessage,
 	shard,
-} from "@kio/shared";
+} from "@kiojs/shared";
 import {
 	createDirectTransport,
 	createTypedTestClient,
 	expectToBeDefined,
 	jsonCodec,
-} from "@kio/shared/test";
+} from "@kiojs/shared/test";
 import * as v from "valibot";
 import { ActorRegistry } from "./actor-registry";
 import { ChannelRuntime } from "./channel-runtime";

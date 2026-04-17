@@ -3,7 +3,7 @@ import type {
 	OperationDefinition,
 	ServerImplDefinition,
 	ShardRef,
-} from "@kio/shared";
+} from "@kiojs/shared";
 import type { Patch } from "immer";
 import { type EventEmitter, safeEmit } from "./events";
 import type { ShardStateManager } from "./shard-state-manager";

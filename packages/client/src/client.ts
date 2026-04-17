@@ -10,12 +10,12 @@ import type {
 	SubmitResult,
 	SubscriptionShardState,
 	SubscriptionsConfig,
-} from "@kio/shared";
+} from "@kiojs/shared";
 import {
 	createSubscriptionsChannel,
 	jsonCodec,
 	SUBSCRIPTIONS_CHANNEL_NAME,
-} from "@kio/shared";
+} from "@kiojs/shared";
 import { ClientChannelEngine } from "./client-channel-engine";
 
 /** Configuration for createClient */

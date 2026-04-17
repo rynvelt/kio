@@ -1,9 +1,9 @@
 /**
- * Type-level tests for @kio/react hooks.
+ * Type-level tests for @kiojs/react hooks.
  * No runtime — pure compile-time assertions via `just typecheck`.
  */
 
-import { channel, engine, shard } from "@kio/shared";
+import { channel, engine, shard } from "@kiojs/shared";
 import * as v from "valibot";
 import { createKioHooks } from "./create-hooks";
 

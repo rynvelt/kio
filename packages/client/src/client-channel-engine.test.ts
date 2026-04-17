@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { type ClientMessage, channel, shard } from "@kio/shared";
-import { expectToBeDefined } from "@kio/shared/test";
+import { type ClientMessage, channel, shard } from "@kiojs/shared";
+import { expectToBeDefined } from "@kiojs/shared/test";
 import * as v from "valibot";
 import { ClientChannelEngine } from "./client-channel-engine";
 

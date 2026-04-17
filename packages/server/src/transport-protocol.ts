@@ -5,7 +5,7 @@ import type {
 	ServerMessage,
 	ServerTransport,
 	Subscriber,
-} from "@kio/shared";
+} from "@kiojs/shared";
 import type { ActorRegistry } from "./actor-registry";
 import type { ChannelRuntime } from "./channel-runtime";
 import type { PipelineResult, Submission } from "./pipeline";

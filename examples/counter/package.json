@@ -1,5 +1,5 @@
 {
-	"name": "@kio/example-counter",
+	"name": "@kiojs/example-counter",
 	"private": true,
 	"type": "module",
 	"scripts": {
@@ -9,12 +9,12 @@
 		"build": "vite build"
 	},
 	"dependencies": {
-		"@kio/client": "workspace:*",
-		"@kio/react": "workspace:*",
-		"@kio/server": "workspace:*",
-		"@kio/shared": "workspace:*",
-		"@kio/transport-bun-ws": "workspace:*",
-		"@kio/transport-ws": "workspace:*",
+		"@kiojs/client": "workspace:*",
+		"@kiojs/react": "workspace:*",
+		"@kiojs/server": "workspace:*",
+		"@kiojs/shared": "workspace:*",
+		"@kiojs/transport-bun-ws": "workspace:*",
+		"@kiojs/transport-ws": "workspace:*",
 		"react": "^19",
 		"react-dom": "^19",
 		"valibot": "^1.3.1"

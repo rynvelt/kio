@@ -1,5 +1,5 @@
 {
-	"name": "@kio/example-location-sharing",
+	"name": "@kiojs/example-location-sharing",
 	"private": true,
 	"type": "module",
 	"scripts": {
@@ -8,12 +8,12 @@
 		"dev:client": "vite"
 	},
 	"dependencies": {
-		"@kio/client": "workspace:*",
-		"@kio/react": "workspace:*",
-		"@kio/server": "workspace:*",
-		"@kio/shared": "workspace:*",
-		"@kio/transport-bun-ws": "workspace:*",
-		"@kio/transport-ws": "workspace:*",
+		"@kiojs/client": "workspace:*",
+		"@kiojs/react": "workspace:*",
+		"@kiojs/server": "workspace:*",
+		"@kiojs/shared": "workspace:*",
+		"@kiojs/transport-bun-ws": "workspace:*",
+		"@kiojs/transport-ws": "workspace:*",
 		"@mantine/core": "9.0.1",
 		"react": "^19",
 		"react-dom": "^19",

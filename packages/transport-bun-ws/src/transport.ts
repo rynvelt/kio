@@ -1,4 +1,4 @@
-import type { ServerTransport } from "@kio/shared";
+import type { ServerTransport } from "@kiojs/shared";
 
 /** Data attached to each WebSocket connection */
 export type KioWsData = { connectionId: string; actor: unknown };

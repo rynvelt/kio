@@ -1,4 +1,4 @@
-import type { Client } from "@kio/client";
+import type { Client } from "@kiojs/client";
 import { createContext, type ReactNode, useContext } from "react";
 
 // Store the client as unknown — typed access comes from createKioHooks

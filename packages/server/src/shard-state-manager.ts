@@ -2,7 +2,7 @@ import {
 	buildShardAccessors,
 	type ShardDefinition,
 	type ShardRef,
-} from "@kio/shared";
+} from "@kiojs/shared";
 import {
 	enableMapSet,
 	enablePatches,

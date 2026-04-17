@@ -6,7 +6,7 @@ sidebar:
 ---
 
 :::note[Status: Exploratory]
-Type-level test patterns are being explored in @kio/core. Runtime and conformance test strategies are design-only.
+Type-level test patterns are being explored in @kiojs/core. Runtime and conformance test strategies are design-only.
 :::
 
 Kio's testing strategy has three layers: **type-level tests** that verify the type system catches invalid schemas at compile time, **runtime tests** that verify the engine behaves correctly, and **adapter conformance tests** that verify third-party implementations meet the adapter contracts.
@@ -144,7 +144,7 @@ This means the full test suite runs in milliseconds and has zero external depend
 
 ```ts
 import { describe, test, expect } from "bun:test"
-import { createServer, createClient, mockTransport } from "@kio/core/test"
+import { createServer, createClient, mockTransport } from "@kiojs/core/test"
 import { myChannel } from "./my-channel"
 
 describe("operation pipeline", () => {
@@ -194,7 +194,7 @@ If your adapter passes the conformance suite, it works with Kio. If a new versio
 
 ### Why a separate package
 
-The conformance tests live in `kio-test-kit` rather than `@kio/core` for two reasons:
+The conformance tests live in `kio-test-kit` rather than `@kiojs/core` for two reasons:
 
 1. **Adapter authors should not need to depend on the full Kio core.** The test kit imports only the adapter interface types.
 2. **Infrastructure-dependent tests stay out of Kio's own CI.** Kio's test suite runs with zero external dependencies. The Postgres conformance tests require a running Postgres instance -- that belongs in the adapter package's CI, not Kio's.

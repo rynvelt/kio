@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { createClient } from "@kio/client";
-import { createServer, MemoryStateAdapter } from "@kio/server";
-import { channel, engine, shard } from "@kio/shared";
-import { createDirectTransport } from "@kio/shared/test";
+import { createClient } from "@kiojs/client";
+import { createServer, MemoryStateAdapter } from "@kiojs/server";
+import { channel, engine, shard } from "@kiojs/shared";
+import { createDirectTransport } from "@kiojs/shared/test";
 import * as v from "valibot";
 
 const gameChannel = channel

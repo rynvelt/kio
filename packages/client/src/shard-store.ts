@@ -1,4 +1,4 @@
-import type { BroadcastShardEntry, ShardState } from "@kio/shared";
+import type { BroadcastShardEntry, ShardState } from "@kiojs/shared";
 import { applyPatches, enableMapSet, enablePatches } from "immer";
 
 enablePatches();

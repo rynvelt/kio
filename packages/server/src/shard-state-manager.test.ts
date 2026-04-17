@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { type ShardDefinition, shard } from "@kio/shared";
+import { type ShardDefinition, shard } from "@kiojs/shared";
 import { MemoryStateAdapter, type StateAdapter } from "./persistence";
 import { ShardStateManager } from "./shard-state-manager";
 

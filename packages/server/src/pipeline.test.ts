@@ -4,8 +4,8 @@ import {
 	createSubscriptionsChannel,
 	KIO_SERVER_ACTOR_ID,
 	shard,
-} from "@kio/shared";
-import { expectToBeDefined } from "@kio/shared/test";
+} from "@kiojs/shared";
+import { expectToBeDefined } from "@kiojs/shared/test";
 import * as v from "valibot";
 import { MemoryStateAdapter } from "./persistence";
 import {
