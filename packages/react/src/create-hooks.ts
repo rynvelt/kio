@@ -11,7 +11,7 @@ import type {
 	SubscriptionShardState,
 	SubscriptionsConfig,
 } from "@kio/shared";
-import { useCallback, useSyncExternalStore } from "react";
+import { useCallback, useMemo, useSyncExternalStore } from "react";
 import { useKioClientInternal } from "./provider";
 
 /** Extract shard defs from a ChannelBuilder */
@@ -58,6 +58,16 @@ type OperationInput<Ch, OpName extends string> =
 			: never
 		: never;
 
+/** Options accepted by the fallback-variant overloads of useShardState. */
+interface ShardStateOptions<T> {
+	/**
+	 * Value returned as `state` whenever `syncStatus` is `"loading"` or
+	 * `"unavailable"`. When set, the returned `state` is never null and the
+	 * consumer can read it without narrowing on `syncStatus`.
+	 */
+	readonly fallback: T;
+}
+
 /** Hooks always available from createKioHooks. */
 interface BaseHooks<TChannels extends object> {
 	useShardState: {
@@ -70,12 +80,31 @@ interface BaseHooks<TChannels extends object> {
 		): ShardState<SingletonState<TChannels[CName], SName>>;
 		<
 			CName extends string & keyof TChannels,
+			SName extends SingletonShardNames<TChannels[CName]>,
+			TState extends SingletonState<TChannels[CName], SName>,
+		>(
+			channelName: CName,
+			shardId: SName,
+			opts: ShardStateOptions<TState>,
+		): ShardState<TState, TState>;
+		<
+			CName extends string & keyof TChannels,
 			SName extends PerResourceShardNames<TChannels[CName]>,
 		>(
 			channelName: CName,
 			shardType: SName,
 			resourceId: string,
 		): ShardState<PerResourceState<TChannels[CName], SName>>;
+		<
+			CName extends string & keyof TChannels,
+			SName extends PerResourceShardNames<TChannels[CName]>,
+			TState extends PerResourceState<TChannels[CName], SName>,
+		>(
+			channelName: CName,
+			shardType: SName,
+			resourceId: string,
+			opts: ShardStateOptions<TState>,
+		): ShardState<TState, TState>;
 	};
 	useSubmit: <CName extends string & keyof TChannels>(
 		channelName: CName,
@@ -120,9 +149,7 @@ export function createKioHooks<
 		: EmptyHooks) {
 	type TChannels = InferChannels<TEngine>;
 
-	/**
-	 * Subscribe to a singleton shard's state.
-	 */
+	/** Subscribe to a singleton shard's state. */
 	function useShardState<
 		CName extends string & keyof TChannels,
 		SName extends SingletonShardNames<TChannels[CName]>,
@@ -131,9 +158,18 @@ export function createKioHooks<
 		shardId: SName,
 	): ShardState<SingletonState<TChannels[CName], SName>>;
 
-	/**
-	 * Subscribe to a per-resource shard's state.
-	 */
+	/** Subscribe to a singleton shard with a fallback value. */
+	function useShardState<
+		CName extends string & keyof TChannels,
+		SName extends SingletonShardNames<TChannels[CName]>,
+		TState extends SingletonState<TChannels[CName], SName>,
+	>(
+		channelName: CName,
+		shardId: SName,
+		opts: ShardStateOptions<TState>,
+	): ShardState<TState, TState>;
+
+	/** Subscribe to a per-resource shard's state. */
 	function useShardState<
 		CName extends string & keyof TChannels,
 		SName extends PerResourceShardNames<TChannels[CName]>,
@@ -143,12 +179,30 @@ export function createKioHooks<
 		resourceId: string,
 	): ShardState<PerResourceState<TChannels[CName], SName>>;
 
+	/** Subscribe to a per-resource shard with a fallback value. */
+	function useShardState<
+		CName extends string & keyof TChannels,
+		SName extends PerResourceShardNames<TChannels[CName]>,
+		TState extends PerResourceState<TChannels[CName], SName>,
+	>(
+		channelName: CName,
+		shardType: SName,
+		resourceId: string,
+		opts: ShardStateOptions<TState>,
+	): ShardState<TState, TState>;
+
 	function useShardState(
 		channelName: string,
 		shardTypeOrId: string,
-		resourceId?: string,
-	): ShardState<Record<string, unknown>> {
+		arg3?: string | ShardStateOptions<Record<string, unknown>>,
+		arg4?: ShardStateOptions<Record<string, unknown>>,
+	): ShardState<Record<string, unknown>, Record<string, unknown> | null> {
 		const client = useKioClientInternal() as Client<TChannels>;
+
+		const resourceId = typeof arg3 === "string" ? arg3 : undefined;
+		const opts = typeof arg3 === "object" ? arg3 : arg4;
+		const fallback = opts?.fallback;
+
 		const shardId =
 			resourceId !== undefined
 				? `${shardTypeOrId}:${resourceId}`
@@ -169,7 +223,15 @@ export function createKioHooks<
 			[ch, shardId],
 		);
 
-		return useSyncExternalStore(subscribe, getSnapshot);
+		const raw = useSyncExternalStore(subscribe, getSnapshot);
+
+		return useMemo(() => {
+			if (fallback === undefined) return raw;
+			if (raw.syncStatus === "loading" || raw.syncStatus === "unavailable") {
+				return { syncStatus: raw.syncStatus, state: fallback, pending: null };
+			}
+			return raw;
+		}, [raw, fallback]);
 	}
 
 	/**

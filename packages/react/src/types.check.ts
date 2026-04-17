@@ -57,6 +57,27 @@ function _validShardState() {
 	}
 }
 
+// ── useShardState: fallback overload ───────────────────────────────
+
+function _validFallback() {
+	// With fallback, state is typed as T on every variant — no narrowing.
+	const counter = useShardState("counter", "count", {
+		fallback: { value: 0 },
+	});
+	const _v: number = counter.state.value;
+
+	const presence = useShardState("presence", "users", {
+		fallback: { connected: [] },
+	});
+	const _u: Array<{ id: string }> = presence.state.connected;
+}
+
+// @ts-expect-error: fallback must match the shard's state shape
+useShardState("counter", "count", { fallback: { value: "not a number" } });
+
+// @ts-expect-error: fallback is required when opts object is passed
+useShardState("counter", "count", {});
+
 // ── useShardState: negative ─────────────────────────────────────────
 
 // @ts-expect-error: "nonexistent" is not a valid channel

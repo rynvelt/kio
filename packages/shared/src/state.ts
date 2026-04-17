@@ -1,13 +1,20 @@
-/** Client-side shard state — discriminated union on syncStatus */
-export type ShardState<T> =
+/**
+ * Client-side shard state — discriminated union on syncStatus.
+ *
+ * `TFallback` controls the `state` type for `unavailable` and `loading`.
+ * Defaults to `null`, matching the raw snapshot. Consumer hooks that
+ * accept a fallback value set `TFallback = T` so `state` is always
+ * usable without narrowing on `syncStatus`.
+ */
+export type ShardState<T, TFallback = null> =
 	| {
 			readonly syncStatus: "unavailable";
-			readonly state: null;
+			readonly state: TFallback;
 			readonly pending: null;
 	  }
 	| {
 			readonly syncStatus: "loading";
-			readonly state: null;
+			readonly state: TFallback;
 			readonly pending: null;
 	  }
 	| {
