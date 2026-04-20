@@ -1,0 +1,52 @@
+{
+	"name": "@kiojs/transport-node-ws",
+	"version": "0.1.0",
+	"description": "Node.js server WebSocket transport for Kio (built on the `ws` library).",
+	"license": "MIT",
+	"author": "Sebastian Krebs",
+	"homepage": "https://github.com/rynvelt/kio#readme",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/rynvelt/kio.git",
+		"directory": "packages/transport-node-ws"
+	},
+	"bugs": {
+		"url": "https://github.com/rynvelt/kio/issues"
+	},
+	"keywords": [
+		"kio",
+		"realtime",
+		"state-sync",
+		"multiplayer",
+		"websocket",
+		"node",
+		"transport"
+	],
+	"type": "module",
+	"sideEffects": false,
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"bun": "./src/index.ts",
+			"types": "./dist/index.d.ts",
+			"default": "./dist/index.js"
+		}
+	},
+	"files": [
+		"dist",
+		"README.md",
+		"LICENSE"
+	],
+	"scripts": {
+		"build": "bunx tsgo -p tsconfig.build.json"
+	},
+	"dependencies": {
+		"@kiojs/shared": "workspace:*",
+		"ws": "8.20.0"
+	},
+	"devDependencies": {
+		"@types/ws": "8.18.1",
+		"@types/node": "25.5.0"
+	}
+}

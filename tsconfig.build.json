@@ -6,6 +6,7 @@
 		{ "path": "./packages/server/tsconfig.build.json" },
 		{ "path": "./packages/react/tsconfig.build.json" },
 		{ "path": "./packages/transport-ws/tsconfig.build.json" },
-		{ "path": "./packages/transport-bun-ws/tsconfig.build.json" }
+		{ "path": "./packages/transport-bun-ws/tsconfig.build.json" },
+		{ "path": "./packages/transport-node-ws/tsconfig.build.json" }
 	]
 }

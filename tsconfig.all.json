@@ -6,6 +6,7 @@
 		{ "path": "./packages/client" },
 		{ "path": "./packages/react" },
 		{ "path": "./packages/transport-bun-ws" },
+		{ "path": "./packages/transport-node-ws" },
 		{ "path": "./packages/transport-ws" },
 		{ "path": "./packages/adapter-prisma" },
 		{ "path": "./packages/e2e-tests" },
