@@ -1,7 +1,7 @@
 # Kio
 
 [![CI](https://github.com/rynvelt/kio/actions/workflows/ci.yml/badge.svg)](https://github.com/rynvelt/kio/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/rynvelt/kio/branch/main/graph/badge.svg)](https://codecov.io/gh/rynvelt/kio)
+[![codecov](https://codecov.io/gh/rynvelt/kio/graph/badge.svg?token=Q2Q8KJ05TU)](https://codecov.io/gh/rynvelt/kio)
 
 Authoritative state synchronization for real-time multiplayer applications. The server owns the truth; clients stay in sync via declarative operations, optimistic concurrency, and patch-based broadcasts.
 
